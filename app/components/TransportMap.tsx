@@ -60,6 +60,8 @@ type PowerOutageCollection = {
   meta?: {
     fetchedAt?: number;
     errors?: Array<{ feed: string; error: string }>;
+    unavailable?: boolean;
+    message?: string;
   };
 };
 
@@ -826,6 +828,7 @@ function PowerOutageLayer({ enabled }: { enabled: boolean }) {
   const map = useMap();
   const layerRef = useRef<L.GeoJSON | null>(null);
   const intervalRef = useRef<number | null>(null);
+  const [unavailableMessage, setUnavailableMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!enabled) {
@@ -837,6 +840,7 @@ function PowerOutageLayer({ enabled }: { enabled: boolean }) {
         layerRef.current.removeFrom(map);
         layerRef.current = null;
       }
+      setUnavailableMessage(null);
       return;
     }
 
@@ -941,9 +945,20 @@ function PowerOutageLayer({ enabled }: { enabled: boolean }) {
       try {
         const resp = await fetch('/api/power-outages');
         const json = (await resp.json()) as PowerOutageCollection;
-        applyData(json);
-      } catch {
-        // ignore
+        
+        if (json?.meta?.unavailable) {
+          setUnavailableMessage(json.meta.message || 'Power outage data is temporarily unavailable');
+          if (layerRef.current) {
+            layerRef.current.removeFrom(map);
+            layerRef.current = null;
+          }
+        } else {
+          setUnavailableMessage(null);
+          applyData(json);
+        }
+      } catch (err) {
+        console.error('PowerOutageLayer fetch error:', err);
+        setUnavailableMessage('Unable to load power outage data');
       }
     };
 
@@ -964,7 +979,62 @@ function PowerOutageLayer({ enabled }: { enabled: boolean }) {
     };
   }, [enabled, map]);
 
-  return null;
+  if (!enabled || !unavailableMessage) return null;
+
+  return (
+    <div style={{
+      position: 'absolute',
+      top: '50%',
+      left: '50%',
+      transform: 'translate(-50%, -50%)',
+      background: 'rgba(255,255,255,0.95)',
+      backdropFilter: 'blur(20px)',
+      padding: '20px 28px',
+      borderRadius: '16px',
+      boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+      border: '1px solid rgba(0,0,0,0.1)',
+      zIndex: 1000,
+      fontFamily: '-apple-system,BlinkMacSystemFont,sans-serif',
+      maxWidth: '400px',
+      textAlign: 'center'
+    }}>
+      <div style={{
+        fontSize: '20px',
+        marginBottom: '8px'
+      }}></div>
+      <div style={{ 
+        fontSize: '15px', 
+        fontWeight: 600,
+        color: '#111827',
+        marginBottom: '8px'
+      }}>
+        Power Outage Data Unavailable
+      </div>
+      <div style={{ 
+        fontSize: '13px', 
+        color: '#6B7280',
+        lineHeight: '1.5'
+      }}>
+        {unavailableMessage}
+      </div>
+      <div style={{
+        marginTop: '12px',
+        paddingTop: '12px',
+        borderTop: '1px solid rgba(0,0,0,0.1)',
+        fontSize: '12px',
+        color: '#9CA3AF'
+      }}>
+        Visit <a 
+          href="https://www.energex.com.au/outages" 
+          target="_blank" 
+          rel="noopener noreferrer"
+          style={{ color: '#3B82F6', textDecoration: 'none', fontWeight: 500 }}
+        >
+          Energex website
+        </a> for current outage information
+      </div>
+    </div>
+  );
 }
 
 function QldTrafficClosuresLayer({ enabled }: { enabled: boolean }) {

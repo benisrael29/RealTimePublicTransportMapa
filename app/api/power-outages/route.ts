@@ -100,19 +100,15 @@ export async function GET() {
     }
   }
 
-  if (merged.length === 0) {
-    return NextResponse.json(
-      {
-        error: 'Failed to fetch outage feeds',
-        source: 'energex',
-        errors,
-      },
-      { status: 502 }
-    );
-  }
-
   const body: GeoJsonFeatureCollection & {
-    meta: { fetchedAt: number; durationMs: number; feeds: typeof FEEDS; errors: typeof errors };
+    meta: { 
+      fetchedAt: number; 
+      durationMs: number; 
+      feeds: typeof FEEDS; 
+      errors: typeof errors;
+      unavailable?: boolean;
+      message?: string;
+    };
   } = {
     type: 'FeatureCollection',
     features: merged,
@@ -121,6 +117,10 @@ export async function GET() {
       durationMs: Date.now() - startedAt,
       feeds: FEEDS,
       errors,
+      unavailable: merged.length === 0,
+      message: merged.length === 0 
+        ? 'Power outage data is temporarily unavailable. Energex API feeds are not responding.'
+        : undefined,
     },
   };
 
