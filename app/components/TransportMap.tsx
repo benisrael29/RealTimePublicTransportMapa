@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline, useMapEvents } from 'react-leaflet';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline, useMapEvents, Rectangle } from 'react-leaflet';
 import type {
   LatLngLiteral,
   Map as LeafletMap,
@@ -44,6 +44,13 @@ interface RouteStop {
   stop_lat: number;
   stop_lon: number;
   stop_sequence: number;
+}
+
+interface Stop {
+  stop_id: string;
+  stop_name: string;
+  stop_lat: number;
+  stop_lon: number;
 }
 
 const VEHICLE_COLORS = {
@@ -461,12 +468,182 @@ function RoutePolyline({ route }: { route: RouteShape }) {
   );
 }
 
+type StopPoint = { x: number; y: number; id: string };
+
+const mercatorProjectMeters = (lat: number, lon: number) => {
+  const R = 6378137;
+  const rad = Math.PI / 180;
+  const x = R * lon * rad;
+  const clampedLat = Math.max(-85, Math.min(85, lat));
+  const y = R * Math.log(Math.tan(Math.PI / 4 + (clampedLat * rad) / 2));
+  return { x, y };
+};
+
+class StopSpatialIndex {
+  private binSizeMeters: number;
+  private bins: Map<string, StopPoint[]>;
+
+  constructor(stops: Stop[], binSizeMeters: number = 900) {
+    this.binSizeMeters = binSizeMeters;
+    this.bins = new Map();
+    for (const s of stops) {
+      const { x, y } = mercatorProjectMeters(s.stop_lat, s.stop_lon);
+      const ix = Math.floor(x / this.binSizeMeters);
+      const iy = Math.floor(y / this.binSizeMeters);
+      const key = `${ix},${iy}`;
+      const arr = this.bins.get(key);
+      const pt: StopPoint = { x, y, id: s.stop_id };
+      if (arr) arr.push(pt);
+      else this.bins.set(key, [pt]);
+    }
+  }
+
+  nearestDistanceMeters(lat: number, lon: number): number | null {
+    if (this.bins.size === 0) return null;
+    const { x, y } = mercatorProjectMeters(lat, lon);
+    const ix0 = Math.floor(x / this.binSizeMeters);
+    const iy0 = Math.floor(y / this.binSizeMeters);
+
+    let bestSq = Number.POSITIVE_INFINITY;
+    let foundAny = false;
+
+    for (let r = 0; r <= 24; r++) {
+      const minPossible = Math.max(0, r * this.binSizeMeters);
+      if (foundAny && minPossible * minPossible > bestSq) break;
+
+      for (let dx = -r; dx <= r; dx++) {
+        for (let dy = -r; dy <= r; dy++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          const key = `${ix0 + dx},${iy0 + dy}`;
+          const bucket = this.bins.get(key);
+          if (!bucket) continue;
+          foundAny = true;
+          for (const pt of bucket) {
+            const ddx = pt.x - x;
+            const ddy = pt.y - y;
+            const sq = ddx * ddx + ddy * ddy;
+            if (sq < bestSq) bestSq = sq;
+          }
+        }
+      }
+    }
+
+    if (!foundAny || !Number.isFinite(bestSq)) return null;
+    return Math.sqrt(bestSq);
+  }
+}
+
+const heatColorForDistance = (meters: number, maxMeters: number) => {
+  const t = Math.max(0, Math.min(1, meters / maxMeters));
+  let r: number;
+  let g: number;
+  let b: number;
+  if (t < 0.5) {
+    const u = t / 0.5;
+    r = Math.round(40 + (255 - 40) * u);
+    g = Math.round(200 + (220 - 200) * u);
+    b = Math.round(60 + (60 - 60) * u);
+  } else {
+    const u = (t - 0.5) / 0.5;
+    r = Math.round(255 + (220 - 255) * u);
+    g = Math.round(220 + (40 - 220) * u);
+    b = Math.round(60 + (40 - 60) * u);
+  }
+  return { r, g, b };
+};
+
+function AccessibilityHeatmapLayer({
+  enabled,
+  stops,
+}: {
+  enabled: boolean;
+  stops: Stop[];
+}) {
+  const map = useMap();
+  const [, setUpdateCounter] = useState(0);
+  
+  const index = useMemo(() => {
+    if (!enabled || stops.length === 0) return null;
+    console.log('Building spatial index with', stops.length, 'stops');
+    return new StopSpatialIndex(stops, 900);
+  }, [enabled, stops]);
+
+  useEffect(() => {
+    if (!enabled || !index) return;
+
+    console.log('Adding heatmap layer to map');
+
+    const update = () => {
+      setUpdateCounter(c => c + 1);
+    };
+
+    map.on('moveend', update);
+    map.on('zoomend', update);
+    
+    return () => {
+      console.log('Removing heatmap layer from map');
+      map.off('moveend', update);
+      map.off('zoomend', update);
+    };
+  }, [enabled, index, map]);
+
+  if (!enabled || !index) return null;
+
+  const bounds = map.getBounds();
+  const nw = bounds.getNorthWest();
+  const se = bounds.getSouthEast();
+
+  const gridSize = 100;
+  const cells = [];
+  const maxMeters = 3000;
+
+  const latStep = (se.lat - nw.lat) / gridSize;
+  const lngStep = (se.lng - nw.lng) / gridSize;
+
+  for (let i = 0; i < gridSize; i++) {
+    for (let j = 0; j < gridSize; j++) {
+      const lat = nw.lat + (i + 0.5) * latStep;
+      const lng = nw.lng + (j + 0.5) * lngStep;
+      
+      const d0 = index.nearestDistanceMeters(lat, lng);
+      const d = d0 === null ? maxMeters : Math.min(d0, maxMeters);
+      const { r, g, b } = heatColorForDistance(d, maxMeters);
+
+      const swLat = nw.lat + i * latStep;
+      const swLng = nw.lng + j * lngStep;
+      const neLat = nw.lat + (i + 1) * latStep;
+      const neLng = nw.lng + (j + 1) * lngStep;
+
+      cells.push(
+        <Rectangle
+          key={`cell-${i}-${j}`}
+          bounds={[[swLat, swLng], [neLat, neLng]]}
+          pathOptions={{
+            fillColor: `rgb(${r},${g},${b})`,
+            fillOpacity: 0.35,
+            stroke: false,
+            interactive: false,
+          }}
+        />
+      );
+    }
+  }
+
+  console.log('Rendering', cells.length, 'heat cells');
+
+  return <>{cells}</>;
+}
+
 
 export default function TransportMap() {
   const [vehicles, setVehicles] = useState<VehiclePosition[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showInfo, setShowInfo] = useState(false);
+  const [showAccessibility, setShowAccessibility] = useState(false);
+  const [stops, setStops] = useState<Stop[]>([]);
+  const [stopsLoading, setStopsLoading] = useState(false);
+  const [stopsError, setStopsError] = useState<string | null>(null);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   const [displayedRoute, setDisplayedRoute] = useState<RouteShape | null>(null);
   const [loadingRoute, setLoadingRoute] = useState(false);
@@ -522,6 +699,25 @@ export default function TransportMap() {
     map.setView(prev.center, prev.zoom, { animate: true });
     previousMapViewRef.current = null;
   }, []);
+
+  const ensureStopsLoaded = useCallback(async () => {
+    if (stopsLoading) return;
+    if (stops.length > 0) return;
+    setStopsLoading(true);
+    setStopsError(null);
+    try {
+      const resp = await fetch('/api/stops');
+      const data = await resp.json();
+      if (data?.error) throw new Error(data.error);
+      const obj = data?.stops as Record<string, Stop> | undefined;
+      const arr = obj ? Object.values(obj) : [];
+      setStops(arr);
+    } catch (e) {
+      setStopsError(e instanceof Error ? e.message : 'Failed to load stops');
+    } finally {
+      setStopsLoading(false);
+    }
+  }, [stops.length, stopsLoading]);
 
   const fetchVehicles = useCallback(async () => {
     try {
@@ -725,6 +921,12 @@ export default function TransportMap() {
   }, [fetchVehicles]);
 
   useEffect(() => {
+    if (showAccessibility) {
+      void ensureStopsLoaded();
+    }
+  }, [showAccessibility, ensureStopsLoaded]);
+
+  useEffect(() => {
     const uniqueRouteIds: string[] = [];
     const seen = new Set<string>();
     for (const v of vehicles) {
@@ -770,6 +972,7 @@ export default function TransportMap() {
           subdomains="abcd"
         />
         <MapUpdater mapRef={mapRef} />
+        <AccessibilityHeatmapLayer enabled={showAccessibility && !loadingRoute} stops={stops} />
         {displayedRoute &&
           routeStopsRouteId === displayedRoute.routeId &&
           routeStops.length > 0 &&
@@ -954,6 +1157,45 @@ export default function TransportMap() {
           </div>
         </div>
       )}
+
+      {showAccessibility && (stopsLoading || stopsError) && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur-xl px-4 py-2 rounded-xl shadow-lg z-[1000] border border-gray-200/50 max-w-sm">
+          <div className="flex items-center gap-2">
+            {stopsLoading ? (
+              <>
+                <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                <p className="text-xs font-medium text-gray-800">Loading stops for accessibility map…</p>
+              </>
+            ) : (
+              <>
+                <div className="text-red-500 text-sm">!</div>
+                <p className="text-xs text-red-700">{stopsError}</p>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showAccessibility && !stopsLoading && !stopsError && stops.length > 0 && (
+        <div className="absolute bottom-6 left-6 bg-white/90 backdrop-blur-xl px-4 py-3 rounded-2xl shadow-2xl z-[1000] border border-gray-200/50 w-[240px]">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-xs font-semibold text-gray-800">Accessibility (nearest stop)</div>
+            <div className="text-[11px] text-gray-500">Stops: {stops.length}</div>
+          </div>
+          <div
+            className="h-3 w-full rounded-full"
+            style={{
+              background:
+                'linear-gradient(90deg, rgba(40,200,60,0.9) 0%, rgba(255,220,60,0.9) 50%, rgba(220,40,40,0.9) 100%)',
+            }}
+          />
+          <div className="mt-2 flex justify-between text-[11px] text-gray-600">
+            <span>0 m</span>
+            <span>2.5 km</span>
+            <span>5 km+</span>
+          </div>
+        </div>
+      )}
       
       <button
         onClick={() => setShowInfo(!showInfo)}
@@ -973,6 +1215,16 @@ export default function TransportMap() {
             strokeWidth={2}
             d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
           />
+        </svg>
+      </button>
+
+      <button
+        onClick={() => setShowAccessibility((v) => !v)}
+        className="absolute top-6 right-20 bg-white/90 backdrop-blur-xl px-4 py-3 rounded-2xl shadow-2xl z-[1000] border border-gray-200/50 hover:bg-white transition-colors"
+        aria-label="Toggle accessibility heatmap"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 24 24" fill={showAccessibility ? '#007AFF' : 'none'} stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h4l2-6 4 12 2-6h4" />
         </svg>
       </button>
 
