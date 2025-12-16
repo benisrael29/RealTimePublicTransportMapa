@@ -401,7 +401,16 @@ function AnimatedMarker({
   );
 }
 
-function MapUpdater() {
+function MapUpdater({ mapRef }: { mapRef: React.MutableRefObject<LeafletMap | null> }) {
+  const map = useMap();
+
+  useEffect(() => {
+    mapRef.current = map;
+    return () => {
+      if (mapRef.current === map) mapRef.current = null;
+    };
+  }, [map, mapRef]);
+
   return null;
 }
 
@@ -760,7 +769,7 @@ export default function TransportMap() {
           url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
           subdomains="abcd"
         />
-        <MapUpdater />
+        <MapUpdater mapRef={mapRef} />
         {displayedRoute &&
           routeStopsRouteId === displayedRoute.routeId &&
           routeStops.length > 0 &&
@@ -835,6 +844,7 @@ export default function TransportMap() {
               eventHandlers={{
                 remove: () => {
                   routeRequestIdRef.current += 1;
+                  restoreMapViewAfterRoute();
                   setSelectedVehicleId(null);
                   setDisplayedRoute(null);
                   setRouteError(null);
