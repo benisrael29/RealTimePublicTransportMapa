@@ -2,7 +2,13 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline, useMapEvents } from 'react-leaflet';
-import type { LatLngLiteral, Map as LeafletMap, Polyline as LeafletPolyline } from 'leaflet';
+import type {
+  LatLngLiteral,
+  Map as LeafletMap,
+  Polyline as LeafletPolyline,
+  LeafletEventHandlerFnMap,
+  Marker as LeafletMarker,
+} from 'leaflet';
 import L from 'leaflet';
 
 type VehicleType = 'bus' | 'train' | 'ferry' | 'unknown';
@@ -288,11 +294,11 @@ function AnimatedMarker({
 }: { 
   position: [number, number]; 
   icon: L.Icon | L.DivIcon;
-  eventHandlers?: any;
+  eventHandlers?: LeafletEventHandlerFnMap;
   children?: React.ReactNode;
 }) {
   const map = useMap();
-  const markerRef = useRef<any>(null);
+  const markerRef = useRef<LeafletMarker | null>(null);
   const previousPositionRef = useRef<[number, number] | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const startTimeRef = useRef<number | null>(null);
@@ -301,7 +307,7 @@ function AnimatedMarker({
   const currentAnimatedPositionRef = useRef<[number, number] | null>(null);
 
   useEffect(() => {
-    const leafletMarker = markerRef.current?.leafletElement ?? markerRef.current;
+    const leafletMarker = markerRef.current;
     if (!leafletMarker) return;
 
     const currentPos: [number, number] = [position[0], position[1]];
@@ -344,7 +350,7 @@ function AnimatedMarker({
     const duration = Math.max(6500, Math.min(60000, pixelDistance * 120));
 
     const animate = () => {
-      const leafletMarker = markerRef.current?.leafletElement ?? markerRef.current;
+      const leafletMarker = markerRef.current;
       if (!leafletMarker || !startTimeRef.current || !startPositionRef.current || !targetPositionRef.current) return;
 
       const elapsed = Date.now() - startTimeRef.current;
@@ -386,7 +392,7 @@ function AnimatedMarker({
   return (
     <Marker
       ref={markerRef}
-      position={currentAnimatedPositionRef.current || previousPositionRef.current || position}
+      position={position}
       icon={icon}
       eventHandlers={eventHandlers}
     >
@@ -395,7 +401,7 @@ function AnimatedMarker({
   );
 }
 
-function MapUpdater({ vehicles, isInitialLoad }: { vehicles: VehiclePosition[]; isInitialLoad: boolean }) {
+function MapUpdater() {
   return null;
 }
 
@@ -451,20 +457,17 @@ export default function TransportMap() {
   const [vehicles, setVehicles] = useState<VehiclePosition[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [showInfo, setShowInfo] = useState(false);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   const [displayedRoute, setDisplayedRoute] = useState<RouteShape | null>(null);
   const [loadingRoute, setLoadingRoute] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
   const [routeStops, setRouteStops] = useState<RouteStop[]>([]);
-  const [loadingStops, setLoadingStops] = useState(false);
   const [routeStopsRouteId, setRouteStopsRouteId] = useState<string | null>(null);
   const routeRequestIdRef = useRef(0);
   const routeCacheRef = useRef<Map<string, { route: RouteShape; stops: RouteStop[] }>>(new Map());
   const prefetchInFlightRef = useRef<Set<string>>(new Set());
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const initialLoadTimeoutRef = useRef<number | null>(null);
   const iconCacheRef = useRef<Map<string, L.DivIcon>>(new Map());
   const mapRef = useRef<LeafletMap | null>(null);
   const previousMapViewRef = useRef<{ center: LatLngLiteral; zoom: number } | null>(null);
@@ -553,27 +556,9 @@ export default function TransportMap() {
       setVehicles(vehiclesWithType);
       setError(null);
       setLoading(false);
-      setIsInitialLoad(prev => {
-        if (prev && initialLoadTimeoutRef.current === null) {
-          initialLoadTimeoutRef.current = window.setTimeout(() => {
-            setIsInitialLoad(false);
-            initialLoadTimeoutRef.current = null;
-          }, 1000);
-        }
-        return prev;
-      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
       setLoading(false);
-      setIsInitialLoad(prev => {
-        if (prev && initialLoadTimeoutRef.current === null) {
-          initialLoadTimeoutRef.current = window.setTimeout(() => {
-            setIsInitialLoad(false);
-            initialLoadTimeoutRef.current = null;
-          }, 1000);
-        }
-        return prev;
-      });
     }
   }, []);
 
@@ -636,12 +621,10 @@ export default function TransportMap() {
       setRouteStops(cached.stops);
       setRouteStopsRouteId(vehicle.routeId);
       setLoadingRoute(false);
-      setLoadingStops(false);
       return;
     }
 
     setLoadingRoute(true);
-    setLoadingStops(true);
     setRouteError(null);
     setDisplayedRoute(null);
     setRouteStops([]);
@@ -704,7 +687,6 @@ export default function TransportMap() {
       setRouteStopsRouteId(null);
     } finally {
       setLoadingRoute(false);
-      setLoadingStops(false);
     }
   };
 
@@ -717,7 +699,6 @@ export default function TransportMap() {
     setRouteStops([]);
     setRouteStopsRouteId(null);
     setLoadingRoute(false);
-    setLoadingStops(false);
   };
 
   useEffect(() => {
@@ -730,10 +711,6 @@ export default function TransportMap() {
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
-      }
-      if (initialLoadTimeoutRef.current !== null) {
-        clearTimeout(initialLoadTimeoutRef.current);
-        initialLoadTimeoutRef.current = null;
       }
     };
   }, [fetchVehicles]);
@@ -750,7 +727,7 @@ export default function TransportMap() {
     }
 
     const schedule = (cb: () => void) => {
-      const ric = (window as any).requestIdleCallback as undefined | ((fn: () => void, opts?: any) => number);
+      const ric = (window as unknown as { requestIdleCallback?: (fn: () => void, opts?: { timeout: number }) => number }).requestIdleCallback;
       if (ric) {
         ric(cb, { timeout: 1500 });
       } else {
@@ -783,7 +760,7 @@ export default function TransportMap() {
           url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
           subdomains="abcd"
         />
-        <MapUpdater vehicles={vehicles} isInitialLoad={isInitialLoad} />
+        <MapUpdater />
         {displayedRoute &&
           routeStopsRouteId === displayedRoute.routeId &&
           routeStops.length > 0 &&
@@ -864,7 +841,6 @@ export default function TransportMap() {
                   setRouteStops([]);
                   setRouteStopsRouteId(null);
                   setLoadingRoute(false);
-                  setLoadingStops(false);
                 },
               }}
             >

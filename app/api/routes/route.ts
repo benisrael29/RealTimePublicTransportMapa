@@ -4,11 +4,6 @@ import { getGtfsZip, GTFS_ZIP_URL } from '../_gtfsZip';
 export const dynamic = 'force-dynamic';
 export const revalidate = 3600; // Cache for 1 hour
 
-interface RouteInfo {
-  route_id: string;
-  route_type: number;
-}
-
 let routeTypeCache: Map<string, number> | null = null;
 let cacheTimestamp: number = 0;
 const CACHE_DURATION = 3600000; // 1 hour in milliseconds

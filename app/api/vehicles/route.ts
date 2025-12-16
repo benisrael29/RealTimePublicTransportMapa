@@ -88,18 +88,6 @@ export async function GET() {
       'https://gtfsrt.api.translink.com.au/GTFS/SEQ/VehiclePositions_Rail.pb',
       'https://gtfsrt.api.translink.com.au/GTFS/SEQ/VehiclePositions_Rail.pb',
     ];
-    
-    const busEndpoints = [
-      'https://gtfsrt.api.translink.com.au/api/realtime/SEQ/VehiclePositions/Bus',
-      'https://gtfsrt.api.translink.com.au/Feed/SEQ/VehiclePositions/Bus',
-      'https://gtfsrt.api.translink.com.au/GTFS/SEQ/VehiclePositions_Bus.pb',
-    ];
-    
-    const ferryEndpoints = [
-      'https://gtfsrt.api.translink.com.au/api/realtime/SEQ/VehiclePositions/Ferry',
-      'https://gtfsrt.api.translink.com.au/Feed/SEQ/VehiclePositions/Ferry',
-      'https://gtfsrt.api.translink.com.au/GTFS/SEQ/VehiclePositions_Ferry.pb',
-    ];
 
     let allVehicles: VehiclePosition[] = [];
     let lastError: Error | null = null;
@@ -129,7 +117,7 @@ export async function GET() {
           const newVehicles = vehicles.filter(v => !existingIds.has(v.id));
           allVehicles = [...allVehicles, ...newVehicles];
         }
-      } catch (err) {
+      } catch {
         // Silently fail for separate endpoints - they may not exist
         continue;
       }
