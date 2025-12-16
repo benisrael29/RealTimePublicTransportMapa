@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { fetchShapes } from '../../shapes/route';
+import { fetchShapeCoordinates } from '../../shapes/route';
 import { fetchRouteToShapeMapping } from '../../trips/route';
 import { fetchRouteTypes } from '../../routes/route';
 
@@ -91,9 +91,7 @@ export async function GET(
       );
     }
 
-    // Fetch shapes
-    const shapes = await fetchShapes();
-    const coordinates = shapes.get(shapeId);
+    const coordinates = await fetchShapeCoordinates(shapeId);
 
     if (!coordinates || coordinates.length === 0) {
       return NextResponse.json(

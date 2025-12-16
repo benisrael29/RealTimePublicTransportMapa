@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import AdmZip from 'adm-zip';
+import { getGtfsZip, GTFS_ZIP_URL } from '../_gtfsZip';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 3600; // Cache for 1 hour
@@ -29,23 +29,8 @@ async function fetchRouteTypes(): Promise<Map<string, number>> {
 
   const routeMap = new Map<string, number>();
 
-  // Download and extract GTFS ZIP file
-  const gtfsZipUrl = 'https://gtfsrt.api.translink.com.au/GTFS/SEQ_GTFS.zip';
-
   try {
-    console.log('Downloading GTFS ZIP file from:', gtfsZipUrl);
-    const response = await fetch(gtfsZipUrl, {
-      headers: {
-        'Accept': 'application/zip, application/x-zip-compressed, */*',
-      },
-      next: { revalidate: 3600 },
-    });
-
-    if (response.ok) {
-      const arrayBuffer = await response.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      const zip = new AdmZip(buffer);
-      
+    const zip = await getGtfsZip(3600);
       // Extract routes.txt from the ZIP
       const routesEntry = zip.getEntry('routes.txt');
       if (routesEntry) {
@@ -117,7 +102,7 @@ async function fetchRouteTypes(): Promise<Map<string, number>> {
               buses: typeCounts.bus,
               ferries: typeCounts.ferry,
               other: typeCounts.other,
-              source: url,
+              source: GTFS_ZIP_URL,
             });
             
             routeTypeCache = routeMap;
@@ -129,7 +114,6 @@ async function fetchRouteTypes(): Promise<Map<string, number>> {
       } else {
         console.warn('routes.txt not found in GTFS ZIP file');
       }
-    }
   } catch (err) {
     console.error(`Failed to fetch and extract GTFS ZIP:`, err);
   }

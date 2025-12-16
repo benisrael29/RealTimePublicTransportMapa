@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline, useMapEvents } from 'react-leaflet';
 import type { Polyline as LeafletPolyline } from 'leaflet';
 import L from 'leaflet';
@@ -30,6 +30,14 @@ interface RouteShape {
   coordinates: [number, number][];
   routeType: number;
   vehicleType?: VehicleType;
+}
+
+interface RouteStop {
+  stop_id: string;
+  stop_name: string;
+  stop_lat: number;
+  stop_lon: number;
+  stop_sequence: number;
 }
 
 const VEHICLE_COLORS = {
@@ -163,6 +171,23 @@ const createSmallDotIcon = (color: string = '#007AFF', opacity: number = 0.75) =
   });
 };
 
+// Stop marker icon
+const createStopIcon = (color: string = '#007AFF') => {
+  const size = 12;
+  return L.divIcon({
+    className: 'stop-marker',
+    html: `
+      <svg width="${size}" height="${size}" viewBox="0 0 12 12" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="6" cy="6" r="5" fill="${color}" stroke="white" stroke-width="2" opacity="0.9"/>
+        <circle cx="6" cy="6" r="2.5" fill="white"/>
+      </svg>
+    `,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+    popupAnchor: [0, -size / 2],
+  });
+};
+
 // Large detailed icon for active/clicked state
 const createLargeVehicleIcon = (color: string = '#007AFF', type: VehicleType = 'unknown', opacity: number = 0.9) => {
   const size = 40;
@@ -255,6 +280,121 @@ const createLargeVehicleIcon = (color: string = '#007AFF', type: VehicleType = '
   });
 };
 
+function AnimatedMarker({ 
+  position, 
+  icon, 
+  eventHandlers, 
+  children 
+}: { 
+  position: [number, number]; 
+  icon: L.Icon | L.DivIcon;
+  eventHandlers?: any;
+  children?: React.ReactNode;
+}) {
+  const map = useMap();
+  const markerRef = useRef<any>(null);
+  const previousPositionRef = useRef<[number, number] | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const startTimeRef = useRef<number | null>(null);
+  const startPositionRef = useRef<[number, number] | null>(null);
+  const targetPositionRef = useRef<[number, number] | null>(null);
+  const currentAnimatedPositionRef = useRef<[number, number] | null>(null);
+
+  useEffect(() => {
+    const leafletMarker = markerRef.current?.leafletElement ?? markerRef.current;
+    if (!leafletMarker) return;
+
+    const currentPos: [number, number] = [position[0], position[1]];
+    
+    // If this is the first position or position hasn't changed, just set it
+    if (!previousPositionRef.current || 
+        (previousPositionRef.current[0] === currentPos[0] && 
+         previousPositionRef.current[1] === currentPos[1])) {
+      leafletMarker.setLatLng(currentPos);
+      previousPositionRef.current = currentPos;
+      currentAnimatedPositionRef.current = currentPos;
+      return;
+    }
+
+    // Get the current animated position (where the marker is right now, even if mid-animation)
+    let startPos: [number, number];
+    if (currentAnimatedPositionRef.current) {
+      // Use current animated position for seamless transition
+      startPos = currentAnimatedPositionRef.current;
+    } else if (previousPositionRef.current) {
+      // Fallback to previous position
+      startPos = previousPositionRef.current;
+    } else {
+      startPos = currentPos;
+    }
+
+    // Cancel any ongoing animation
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+    }
+
+    // Start new animation from current position to new target
+    const endPos = currentPos;
+    startPositionRef.current = startPos;
+    targetPositionRef.current = endPos;
+    startTimeRef.current = Date.now();
+    const p1 = map.latLngToLayerPoint([startPos[0], startPos[1]]);
+    const p2 = map.latLngToLayerPoint([endPos[0], endPos[1]]);
+    const pixelDistance = p1.distanceTo(p2);
+    const duration = Math.max(6500, Math.min(60000, pixelDistance * 120));
+
+    const animate = () => {
+      const leafletMarker = markerRef.current?.leafletElement ?? markerRef.current;
+      if (!leafletMarker || !startTimeRef.current || !startPositionRef.current || !targetPositionRef.current) return;
+
+      const elapsed = Date.now() - startTimeRef.current;
+      const progress = Math.min(elapsed / duration, 1);
+      
+      // Linear easing for constant speed movement
+      const eased = progress;
+
+      // Interpolate position
+      const lat = startPositionRef.current[0] + (targetPositionRef.current[0] - startPositionRef.current[0]) * eased;
+      const lng = startPositionRef.current[1] + (targetPositionRef.current[1] - startPositionRef.current[1]) * eased;
+
+      const currentPos: [number, number] = [lat, lng];
+      leafletMarker.setLatLng(currentPos);
+      currentAnimatedPositionRef.current = currentPos; // Track current animated position
+
+      if (progress < 1) {
+        animationFrameRef.current = requestAnimationFrame(animate);
+      } else {
+        // Animation complete
+        previousPositionRef.current = targetPositionRef.current;
+        currentAnimatedPositionRef.current = targetPositionRef.current;
+        animationFrameRef.current = null;
+        startTimeRef.current = null;
+        startPositionRef.current = null;
+        targetPositionRef.current = null;
+      }
+    };
+
+    animationFrameRef.current = requestAnimationFrame(animate);
+
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, [position, map]);
+
+  return (
+    <Marker
+      ref={markerRef}
+      position={currentAnimatedPositionRef.current || previousPositionRef.current || position}
+      icon={icon}
+      eventHandlers={eventHandlers}
+    >
+      {children}
+    </Marker>
+  );
+}
+
 function MapUpdater({ vehicles, isInitialLoad }: { vehicles: VehiclePosition[]; isInitialLoad: boolean }) {
   return null;
 }
@@ -326,9 +466,15 @@ export default function TransportMap() {
   const [displayedRoute, setDisplayedRoute] = useState<RouteShape | null>(null);
   const [loadingRoute, setLoadingRoute] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
+  const [routeStops, setRouteStops] = useState<RouteStop[]>([]);
+  const [loadingStops, setLoadingStops] = useState(false);
+  const [routeStopsRouteId, setRouteStopsRouteId] = useState<string | null>(null);
+  const routeRequestIdRef = useRef(0);
+  const routeCacheRef = useRef<Map<string, { route: RouteShape; stops: RouteStop[] }>>(new Map());
+  const prefetchInFlightRef = useRef<Set<string>>(new Set());
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  const fetchVehicles = async () => {
+  const fetchVehicles = useCallback(async () => {
     try {
       const response = await fetch('/api/vehicles');
       const data: VehicleData = await response.json();
@@ -374,17 +520,54 @@ export default function TransportMap() {
       setVehicles(vehiclesWithType);
       setError(null);
       setLoading(false);
-      if (isInitialLoad) {
-        setTimeout(() => setIsInitialLoad(false), 1000);
-      }
+      setIsInitialLoad(prev => {
+        if (prev) {
+          setTimeout(() => setIsInitialLoad(false), 1000);
+        }
+        return prev;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
       setLoading(false);
-      if (isInitialLoad) {
-        setTimeout(() => setIsInitialLoad(false), 1000);
-      }
+      setIsInitialLoad(prev => {
+        if (prev) {
+          setTimeout(() => setIsInitialLoad(false), 1000);
+        }
+        return prev;
+      });
     }
-  };
+  }, []);
+
+  const prefetchRouteData = useCallback(async (routeId: string, routeType?: number, vehicleType?: VehicleType) => {
+    if (!routeId) return;
+    if (routeCacheRef.current.has(routeId)) return;
+    if (prefetchInFlightRef.current.has(routeId)) return;
+
+    prefetchInFlightRef.current.add(routeId);
+    try {
+      const routeUrl = `/api/route-shape/${encodeURIComponent(routeId)}`;
+      const stopsUrl = `/api/route-stops/${encodeURIComponent(routeId)}`;
+
+      const [routeResp, stopsResp] = await Promise.all([fetch(routeUrl), fetch(stopsUrl)]);
+      const [routeData, stopsData] = await Promise.all([routeResp.json(), stopsResp.json()]);
+
+      if (routeData?.error || stopsData?.error) return;
+      const stops: RouteStop[] = Array.isArray(stopsData?.stops) ? stopsData.stops : [];
+      if (!routeData?.coordinates || !Array.isArray(routeData.coordinates) || stops.length === 0) return;
+
+      const cachedRoute: RouteShape = {
+        ...routeData,
+        routeType: routeType ?? routeData.routeType,
+        vehicleType: vehicleType ?? routeData.vehicleType,
+      };
+
+      routeCacheRef.current.set(routeId, { route: cachedRoute, stops });
+    } catch {
+      // ignore
+    } finally {
+      prefetchInFlightRef.current.delete(routeId);
+    }
+  }, []);
 
   const handleVehicleClick = async (vehicle: VehiclePosition) => {
     console.log('Vehicle clicked:', vehicle);
@@ -399,47 +582,90 @@ export default function TransportMap() {
         ? getVehicleTypeFromRouteType(vehicle.routeType)
         : getVehicleTypeFallback(vehicle.routeId, vehicle.tripId, vehicle.id));
 
-    // Fetch route shape
+    const cached = routeCacheRef.current.get(vehicle.routeId);
+    if (cached) {
+      setRouteError(null);
+      setDisplayedRoute({
+        ...cached.route,
+        routeType:
+          vehicle.routeType !== undefined && vehicle.routeType !== null
+            ? vehicle.routeType
+            : cached.route.routeType,
+        vehicleType: effectiveVehicleType,
+      });
+      setRouteStops(cached.stops);
+      setRouteStopsRouteId(vehicle.routeId);
+      setLoadingRoute(false);
+      setLoadingStops(false);
+      return;
+    }
+
     setLoadingRoute(true);
+    setLoadingStops(true);
     setRouteError(null);
+    setDisplayedRoute(null);
+    setRouteStops([]);
+    setRouteStopsRouteId(null);
+    const requestId = ++routeRequestIdRef.current;
     
     try {
-      const url = `/api/route-shape/${encodeURIComponent(vehicle.routeId)}`;
-      console.log('Fetching route from:', url);
-      
-      const response = await fetch(url);
-      const data = await response.json();
-      
-      console.log('Route response:', data);
-      
-      if (data.error) {
-        console.error('Route error:', data.error);
-        setRouteError(data.error);
-        setDisplayedRoute(null);
-      } else {
-        console.log('Setting displayed route with', data.coordinates?.length, 'coordinates');
-        setDisplayedRoute({
-          ...data,
-          routeType:
-            vehicle.routeType !== undefined && vehicle.routeType !== null
-              ? vehicle.routeType
-              : data.routeType,
-          vehicleType: effectiveVehicleType,
-        });
+      const routeUrl = `/api/route-shape/${encodeURIComponent(vehicle.routeId)}`;
+      const stopsUrl = `/api/route-stops/${encodeURIComponent(vehicle.routeId)}`;
+
+      const [routeResp, stopsResp] = await Promise.all([fetch(routeUrl), fetch(stopsUrl)]);
+      const [routeData, stopsData] = await Promise.all([routeResp.json(), stopsResp.json()]);
+
+      if (routeRequestIdRef.current !== requestId) {
+        return;
       }
+
+      if (routeData?.error) {
+        setRouteError(routeData.error);
+        return;
+      }
+
+      if (stopsData?.error) {
+        setRouteError(stopsData.error);
+        return;
+      }
+
+      const stops: RouteStop[] = Array.isArray(stopsData?.stops) ? stopsData.stops : [];
+      if (stops.length === 0) {
+        setRouteError('No stops found for this route');
+        return;
+      }
+
+      setDisplayedRoute({
+        ...routeData,
+        routeType:
+          vehicle.routeType !== undefined && vehicle.routeType !== null
+            ? vehicle.routeType
+            : routeData.routeType,
+        vehicleType: effectiveVehicleType,
+      });
+      setRouteStops(stops);
+      setRouteStopsRouteId(vehicle.routeId);
     } catch (err) {
       console.error('Failed to fetch route:', err);
       setRouteError(err instanceof Error ? err.message : 'Failed to load route');
       setDisplayedRoute(null);
+      setRouteStops([]);
+      setRouteStopsRouteId(null);
     } finally {
       setLoadingRoute(false);
+      setLoadingStops(false);
     }
   };
 
   const handleMapClick = () => {
+    routeRequestIdRef.current += 1;
     setDisplayedRoute(null);
     setRouteError(null);
     setSelectedVehicleId(null);
+    setRouteStops([]);
+    setRouteStopsRouteId(null);
+    setLoadingRoute(false);
+    setLoadingStops(false);
   };
 
   useEffect(() => {
@@ -459,14 +685,43 @@ export default function TransportMap() {
 
     intervalRef.current = setInterval(() => {
       fetchVehicles();
-    }, 30000);
+    }, 5000);
 
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
       }
     };
-  }, []);
+  }, [fetchVehicles]);
+
+  useEffect(() => {
+    const uniqueRouteIds: string[] = [];
+    const seen = new Set<string>();
+    for (const v of vehicles) {
+      if (!v.routeId) continue;
+      if (seen.has(v.routeId)) continue;
+      seen.add(v.routeId);
+      uniqueRouteIds.push(v.routeId);
+      if (uniqueRouteIds.length >= 12) break;
+    }
+
+    const schedule = (cb: () => void) => {
+      const ric = (window as any).requestIdleCallback as undefined | ((fn: () => void, opts?: any) => number);
+      if (ric) {
+        ric(cb, { timeout: 1500 });
+      } else {
+        setTimeout(cb, 250);
+      }
+    };
+
+    schedule(() => {
+      for (const routeId of uniqueRouteIds) {
+        if (routeCacheRef.current.has(routeId)) continue;
+        const vehicle = vehicles.find(v => v.routeId === routeId);
+        void prefetchRouteData(routeId, vehicle?.routeType, vehicle?.vehicleType);
+      }
+    });
+  }, [vehicles, prefetchRouteData]);
 
   return (
     <div className="w-full h-screen relative overflow-hidden">
@@ -485,9 +740,40 @@ export default function TransportMap() {
           subdomains="abcd"
         />
         <MapUpdater vehicles={vehicles} isInitialLoad={isInitialLoad} />
-        {displayedRoute && displayedRoute.coordinates && displayedRoute.coordinates.length > 0 && (
-          <RoutePolyline route={displayedRoute} />
-        )}
+        {displayedRoute &&
+          routeStopsRouteId === displayedRoute.routeId &&
+          routeStops.length > 0 &&
+          displayedRoute.coordinates &&
+          displayedRoute.coordinates.length > 0 && (
+            <>
+              <RoutePolyline route={displayedRoute} />
+              {routeStops.map((stop) => {
+                const routeColor = getVehicleColor(
+                  displayedRoute.vehicleType ?? getVehicleTypeFromRouteType(displayedRoute.routeType)
+                );
+                const stopIcon = createStopIcon(routeColor);
+                
+                return (
+                  <Marker
+                    key={stop.stop_id}
+                    position={[stop.stop_lat, stop.stop_lon]}
+                    icon={stopIcon}
+                  >
+                    <Popup className="ios-popup">
+                      <div className="p-3 min-w-[200px]">
+                        <div className="font-semibold text-base leading-tight mb-1">
+                          {stop.stop_name}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          Stop {stop.stop_sequence}
+                        </div>
+                      </div>
+                    </Popup>
+                  </Marker>
+                );
+              })}
+            </>
+          )}
         {vehicles.map((vehicle) => {
           const vehicleType = vehicle.vehicleType || 
             (vehicle.routeType !== undefined 
@@ -504,8 +790,8 @@ export default function TransportMap() {
             : createSmallDotIcon(color, isRouteDisplayed ? 0.25 : 0.75);
           
           return (
-            <Marker
-              key={`${vehicle.id}-${vehicleType}-${color}`}
+            <AnimatedMarker
+              key={vehicle.id}
               position={[vehicle.latitude, vehicle.longitude]}
               icon={markerIcon}
               eventHandlers={{
@@ -513,15 +799,25 @@ export default function TransportMap() {
                   setSelectedVehicleId(vehicle.id);
                   handleVehicleClick(vehicle);
                 },
+                mouseover: () => {
+                  if (vehicle.routeId) {
+                    void prefetchRouteData(vehicle.routeId, vehicle.routeType, vehicle.vehicleType);
+                  }
+                },
               }}
             >
               <Popup 
               className="ios-popup"
               eventHandlers={{
                 remove: () => {
+                  routeRequestIdRef.current += 1;
                   setSelectedVehicleId(null);
                   setDisplayedRoute(null);
                   setRouteError(null);
+                  setRouteStops([]);
+                  setRouteStopsRouteId(null);
+                  setLoadingRoute(false);
+                  setLoadingStops(false);
                 },
               }}
             >
@@ -582,7 +878,7 @@ export default function TransportMap() {
                   </div>
                 </div>
               </Popup>
-            </Marker>
+            </AnimatedMarker>
           );
         })}
       </MapContainer>
