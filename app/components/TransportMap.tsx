@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 
 type VehicleType = 'bus' | 'train' | 'ferry' | 'unknown';
@@ -24,11 +24,17 @@ interface VehicleData {
   error?: string;
 }
 
+interface RouteShape {
+  routeId: string;
+  coordinates: [number, number][];
+  routeType: number;
+}
+
 const VEHICLE_COLORS = {
-  bus: '#007AFF',
-  train: '#34C759',
-  ferry: '#AF52DE',
-  unknown: '#8E8E93',
+  bus: '#FFD60A',      // Yellow
+  train: '#34C759',    // Green
+  ferry: '#007AFF',    // Blue
+  unknown: '#8E8E93',  // Gray
 } as const;
 
 const getVehicleTypeFromRouteType = (routeType?: number): VehicleType => {
@@ -80,13 +86,18 @@ const getVehicleTypeFallback = (routeId?: string, tripId?: string, vehicleId?: s
     return 'ferry';
   }
   
-  // Train: 2-3 letter codes at start (e.g., FG, BG, CL, IP)
-  // Check multiple patterns - train routes can have various formats
-  // Examples: FG, BG-123, CL_456, IP-789, etc.
+  // Train: TransLink uses 2-4 letter codes for train lines
+  // Examples: FG, BG-123, FGBN-4596, SHCL-4596, IPCA-4596, CLSH-4596, GCR1-3585
+  // Pattern: 2-4 uppercase letters, optionally followed by dash/underscore and numbers
   const trainPatterns = [
-    /^(FG|BG|CL|IP|RB|SH|EX|GY|DO|CA|NA|RO|SP|VL|BE|KI|SPR|AIR|VLO|NGR|BRI|CAB|CLE|GOL|GYM|IPS|NOR|RED|SHO|SUN|WIL|CR|AR|GC|SC|TS|BN)$/i, // Exact match
-    /^(FG|BG|CL|IP|RB|SH|EX|GY|DO|CA|NA|RO|SP|VL|BE|KI|SPR|AIR|VLO|NGR|BRI|CAB|CLE|GOL|GYM|IPS|NOR|RED|SHO|SUN|WIL|CR|AR|GC|SC|TS|BN)[-_]/i, // With dash/underscore
-    /^(FG|BG|CL|IP|RB|SH|EX|GY|DO|CA|NA|RO|SP|VL|BE|KI|SPR|AIR|VLO|NGR|BRI|CAB|CLE|GOL|GYM|IPS|NOR|RED|SHO|SUN|WIL|CR|AR|GC|SC|TS|BN)\d/i, // With numbers
+    // 2-3 letter codes (original patterns)
+    /^(FG|BG|CL|IP|RB|SH|EX|GY|DO|CA|NA|RO|SP|VL|BE|KI|SPR|AIR|VLO|NGR|BRI|CAB|CLE|GOL|GYM|IPS|NOR|RED|SHO|SUN|WIL|CR|AR|GC|SC|TS|BN)$/i,
+    /^(FG|BG|CL|IP|RB|SH|EX|GY|DO|CA|NA|RO|SP|VL|BE|KI|SPR|AIR|VLO|NGR|BRI|CAB|CLE|GOL|GYM|IPS|NOR|RED|SHO|SUN|WIL|CR|AR|GC|SC|TS|BN)[-_]/i,
+    /^(FG|BG|CL|IP|RB|SH|EX|GY|DO|CA|NA|RO|SP|VL|BE|KI|SPR|AIR|VLO|NGR|BRI|CAB|CLE|GOL|GYM|IPS|NOR|RED|SHO|SUN|WIL|CR|AR|GC|SC|TS|BN)\d/i,
+    // 4-letter train route codes (e.g., FGBN, SHCL, IPCA, CLSH, etc.)
+    /^(FGBN|SHCL|IPCA|CLSH|BGFG|CLCB|IPDO|GCRL|GCR\d|EXIP|SHBE|CLBE|FGCL|IPSH|BGSH|CABG|GYIP|DOFG|ROCL|SPBN|VLSH|BEFG|KICL|AIRF|NGRT)[-_]?\d*/i,
+    // Generic 4-letter uppercase pattern for trains (but not if it looks like a bus code)
+    /^[A-Z]{4}[-_]\d{4}$/,
   ];
   
   // Check if route matches any train pattern
@@ -134,24 +145,111 @@ const getVehicleColor = (type: VehicleType): string => {
   return VEHICLE_COLORS[type];
 };
 
-const createVehicleIcon = (color: string = '#007AFF', type: VehicleType = 'unknown') => {
-  const size = type === 'ferry' ? 14 : type === 'train' ? 16 : 12;
+// Small dot icon for default state
+const createSmallDotIcon = (color: string = '#007AFF') => {
+  const size = 8;
   return L.divIcon({
-    className: 'vehicle-marker',
+    className: 'vehicle-marker-dot',
     html: `
-      <div style="
-        width: ${size}px;
-        height: ${size}px;
-        background: ${color};
-        border: 2px solid white;
-        border-radius: 50%;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.25);
-        transform: translate(-50%, -50%);
-        transition: all 0.3s ease;
-      "></div>
+      <svg width="${size}" height="${size}" viewBox="0 0 8 8" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="4" cy="4" r="3.5" fill="${color}" stroke="white" stroke-width="1" opacity="0.95"/>
+      </svg>
     `,
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
+    popupAnchor: [0, -size / 2],
+  });
+};
+
+// Large detailed icon for active/clicked state
+const createLargeVehicleIcon = (color: string = '#007AFF', type: VehicleType = 'unknown') => {
+  const size = 40;
+  
+  const icons = {
+    bus: `
+      <svg width="${size}" height="${size}" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <filter id="shadow-bus-${color}" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
+            <feOffset dx="0" dy="2" result="offsetblur"/>
+            <feComponentTransfer>
+              <feFuncA type="linear" slope="0.4"/>
+            </feComponentTransfer>
+            <feMerge>
+              <feMergeNode/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+        </defs>
+        <g filter="url(#shadow-bus-${color})">
+          <rect x="8" y="9" width="24" height="22" rx="4" fill="${color}" stroke="white" stroke-width="2.5"/>
+          <rect x="12" y="13" width="7" height="6" rx="1.5" fill="white" opacity="0.95"/>
+          <rect x="21" y="13" width="7" height="6" rx="1.5" fill="white" opacity="0.95"/>
+          <circle cx="14" cy="30" r="2.5" fill="white"/>
+          <circle cx="26" cy="30" r="2.5" fill="white"/>
+        </g>
+      </svg>
+    `,
+    train: `
+      <svg width="${size}" height="${size}" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <filter id="shadow-train-${color}" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
+            <feOffset dx="0" dy="2" result="offsetblur"/>
+            <feComponentTransfer>
+              <feFuncA type="linear" slope="0.4"/>
+            </feComponentTransfer>
+            <feMerge>
+              <feMergeNode/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+        </defs>
+        <g filter="url(#shadow-train-${color})">
+          <rect x="10" y="8" width="20" height="24" rx="2.5" fill="${color}" stroke="white" stroke-width="2.5"/>
+          <rect x="12" y="12" width="16" height="10" rx="1.5" fill="white" opacity="0.95"/>
+          <circle cx="15" cy="30" r="2" fill="white"/>
+          <circle cx="25" cy="30" r="2" fill="white"/>
+          <line x1="13.5" y1="32" x2="11" y2="35" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+          <line x1="26.5" y1="32" x2="29" y2="35" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+        </g>
+      </svg>
+    `,
+    ferry: `
+      <svg width="${size}" height="${size}" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <filter id="shadow-ferry-${color}" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
+            <feOffset dx="0" dy="2" result="offsetblur"/>
+            <feComponentTransfer>
+              <feFuncA type="linear" slope="0.4"/>
+            </feComponentTransfer>
+            <feMerge>
+              <feMergeNode/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+        </defs>
+        <g filter="url(#shadow-ferry-${color})">
+          <path d="M 10 22 L 15 14 L 25 14 L 30 22 L 28 28 L 12 28 Z" fill="${color}" stroke="white" stroke-width="2.5"/>
+          <rect x="17" y="9" width="6" height="5" fill="${color}" stroke="white" stroke-width="2"/>
+          <ellipse cx="20" cy="30" rx="10" ry="2.5" fill="${color}" opacity="0.5" stroke="white" stroke-width="2"/>
+        </g>
+      </svg>
+    `,
+    unknown: `
+      <svg width="${size}" height="${size}" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="20" cy="20" r="10" fill="${color}" stroke="white" stroke-width="2.5" filter="drop-shadow(0 2px 6px rgba(0,0,0,0.4))"/>
+      </svg>
+    `,
+  };
+  
+  return L.divIcon({
+    className: 'vehicle-marker-large',
+    html: icons[type] || icons.unknown,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+    popupAnchor: [0, -size / 2],
   });
 };
 
@@ -173,12 +271,23 @@ function MapUpdater({ vehicles, isInitialLoad }: { vehicles: VehiclePosition[]; 
   return null;
 }
 
+function MapClickHandler({ onMapClick }: { onMapClick: () => void }) {
+  useMapEvents({
+    click: onMapClick,
+  });
+  return null;
+}
+
 export default function TransportMap() {
   const [vehicles, setVehicles] = useState<VehiclePosition[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [showInfo, setShowInfo] = useState(false);
+  const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
+  const [displayedRoute, setDisplayedRoute] = useState<RouteShape | null>(null);
+  const [loadingRoute, setLoadingRoute] = useState(false);
+  const [routeError, setRouteError] = useState<string | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchVehicles = async () => {
@@ -210,16 +319,6 @@ export default function TransportMap() {
             type = getVehicleTypeFallback(vehicle.routeId, vehicle.tripId, vehicle.id);
           }
           
-          // Debug logging for speed (sample first few vehicles)
-          if (process.env.NODE_ENV === 'development' && Math.random() < 0.05) {
-            console.log('Vehicle speed debug:', {
-              id: vehicle.id,
-              speed: vehicle.speed,
-              speedType: typeof vehicle.speed,
-              routeId: vehicle.routeId,
-            });
-          }
-          
           // Debug logging for trains (remove in production)
           if (type === 'train' && process.env.NODE_ENV === 'development') {
             console.log('Train detected:', {
@@ -249,6 +348,46 @@ export default function TransportMap() {
     }
   };
 
+  const handleVehicleClick = async (vehicle: VehiclePosition) => {
+    if (!vehicle.routeId) {
+      setRouteError('No route ID available for this vehicle');
+      return;
+    }
+
+    // Toggle: if same route is already displayed, hide it
+    if (displayedRoute?.routeId === vehicle.routeId) {
+      setDisplayedRoute(null);
+      setRouteError(null);
+      return;
+    }
+
+    // Fetch route shape
+    setLoadingRoute(true);
+    setRouteError(null);
+    
+    try {
+      const response = await fetch(`/api/route-shape/${encodeURIComponent(vehicle.routeId)}`);
+      const data = await response.json();
+      
+      if (data.error) {
+        setRouteError(data.error);
+        setDisplayedRoute(null);
+      } else {
+        setDisplayedRoute(data);
+      }
+    } catch (err) {
+      setRouteError(err instanceof Error ? err.message : 'Failed to load route');
+      setDisplayedRoute(null);
+    } finally {
+      setLoadingRoute(false);
+    }
+  };
+
+  const handleMapClick = () => {
+    setDisplayedRoute(null);
+    setRouteError(null);
+  };
+
   useEffect(() => {
     fetchVehicles();
 
@@ -273,12 +412,23 @@ export default function TransportMap() {
         zoomControl={true}
         className="ios-map"
       >
+        <MapClickHandler onMapClick={handleMapClick} />
         <TileLayer
           attribution='&copy; <a href="https://carto.com/attributions">CARTO</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
           subdomains="abcd"
         />
         <MapUpdater vehicles={vehicles} isInitialLoad={isInitialLoad} />
+        {displayedRoute && (
+          <Polyline
+            positions={displayedRoute.coordinates}
+            pathOptions={{
+              color: getVehicleColor(getVehicleTypeFromRouteType(displayedRoute.routeType)),
+              weight: 4,
+              opacity: 0.7,
+            }}
+          />
+        )}
         {vehicles.map((vehicle) => {
           const vehicleType = vehicle.vehicleType || 
             (vehicle.routeType !== undefined 
@@ -287,17 +437,31 @@ export default function TransportMap() {
             'bus';
           const color = getVehicleColor(vehicleType);
           const typeLabel = vehicleType.charAt(0).toUpperCase() + vehicleType.slice(1);
+          const isSelected = selectedVehicleId === vehicle.id;
           
-          // Create a unique icon instance for each marker to ensure colors are applied
-          const markerIcon = createVehicleIcon(color, vehicleType);
+          const markerIcon = isSelected 
+            ? createLargeVehicleIcon(color, vehicleType)
+            : createSmallDotIcon(color);
           
           return (
             <Marker
               key={`${vehicle.id}-${vehicleType}-${color}`}
               position={[vehicle.latitude, vehicle.longitude]}
               icon={markerIcon}
+              eventHandlers={{
+                click: () => {
+                  setSelectedVehicleId(vehicle.id);
+                },
+              }}
             >
-              <Popup className="ios-popup">
+              <Popup 
+              className="ios-popup"
+              eventHandlers={{
+                remove: () => {
+                  setSelectedVehicleId(null);
+                },
+              }}
+            >
                 <div className="p-3 min-w-[200px]">
                   <div className="flex items-center gap-2 mb-3">
                     <div 
@@ -330,20 +494,19 @@ export default function TransportMap() {
                           return `Route ${route}`;
                         })()}
                       </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleVehicleClick(vehicle);
+                        }}
+                        className="mt-2 text-xs text-blue-600 hover:text-blue-800 underline"
+                      >
+                        {displayedRoute?.routeId === vehicle.routeId ? 'Hide route' : 'Show route'}
+                      </button>
                     </div>
                   )}
                   
                   <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-500">Status</span>
-                      <span className="text-sm font-medium text-gray-800">
-                        {vehicle.speed === undefined || vehicle.speed === null
-                          ? '📍 No speed data'
-                          : vehicle.speed === 0 || vehicle.speed < 0.05
-                          ? '🛑 Stopped' 
-                          : `🚗 ${(vehicle.speed * 3.6).toFixed(0)} km/h`}
-                      </span>
-                    </div>
                     {vehicle.bearing !== undefined && vehicle.bearing > 0 && vehicle.speed !== undefined && vehicle.speed > 0.05 && (
                       <div className="flex items-center justify-between">
                         <span className="text-xs text-gray-500">Direction</span>
@@ -387,6 +550,24 @@ export default function TransportMap() {
               <p className="text-sm font-semibold text-red-800 mb-1">Connection Error</p>
               <p className="text-xs text-red-600">{error}</p>
             </div>
+          </div>
+        </div>
+      )}
+
+      {loadingRoute && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur-xl px-4 py-2 rounded-xl shadow-lg z-[1000] border border-gray-200/50">
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+            <p className="text-xs font-medium text-gray-800">Loading route...</p>
+          </div>
+        </div>
+      )}
+
+      {routeError && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-yellow-50/95 backdrop-blur-xl px-4 py-2 rounded-xl shadow-lg z-[1000] border border-yellow-200/50 max-w-sm">
+          <div className="flex items-start gap-2">
+            <div className="text-yellow-600 text-sm">ℹ️</div>
+            <p className="text-xs text-yellow-800">{routeError}</p>
           </div>
         </div>
       )}

@@ -56,18 +56,60 @@ body {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
 }
 
-.vehicle-marker {
+.vehicle-marker,
+.vehicle-marker-dot,
+.vehicle-marker-large {
   background: transparent !important;
   border: none !important;
 }
 
-.leaflet-marker-icon {
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+.vehicle-marker-dot {
+  cursor: pointer;
+  pointer-events: auto;
 }
 
-.leaflet-marker-icon:hover {
-  transform: scale(1.2);
+.vehicle-marker-dot svg {
+  transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.vehicle-marker-dot:hover svg {
+  transform: scale(1.4);
+}
+
+.vehicle-marker-large {
+  cursor: pointer;
   z-index: 1000 !important;
+  pointer-events: auto;
+}
+
+.vehicle-marker-large svg {
+  filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.2));
+  animation: popIn 0.25s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+@keyframes popIn {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.leaflet-marker-icon {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Improve performance for many markers */
+.leaflet-marker-pane {
+  will-change: transform;
+}
+
+.vehicle-marker-dot svg circle,
+.vehicle-marker-large svg * {
+  vector-effect: non-scaling-stroke;
 }
 
 .leaflet-control-zoom {
