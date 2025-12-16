@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import AdmZip from 'adm-zip';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 86400; // Cache for 24 hours
@@ -44,26 +45,30 @@ async function fetchShapes(): Promise<Map<string, [number, number][]>> {
 
   const shapesMap = new Map<string, [number, number][]>();
 
-  // Try to fetch shapes.txt directly
-  const shapesTxtUrls = [
-    'https://gtfsrt.api.translink.com.au/GTFS/SEQ/shapes.txt',
-    'https://transitfeeds.com/p/translink/21/latest/download/shapes.txt',
-  ];
+  // Download and extract GTFS ZIP file
+  const gtfsZipUrl = 'https://gtfsrt.api.translink.com.au/GTFS/SEQ_GTFS.zip';
 
-  for (const url of shapesTxtUrls) {
-    try {
-      const response = await fetch(url, {
-        headers: {
-          'Accept': 'text/csv, text/plain, */*',
-        },
-        next: { revalidate: 86400 },
-      });
+  try {
+    console.log('Downloading GTFS ZIP file for shapes from:', gtfsZipUrl);
+    const response = await fetch(gtfsZipUrl, {
+      headers: {
+        'Accept': 'application/zip, application/x-zip-compressed, */*',
+      },
+      next: { revalidate: 86400 },
+    });
 
-      if (response.ok) {
-        const text = await response.text();
+    if (response.ok) {
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const zip = new AdmZip(buffer);
+      
+      // Extract shapes.txt from the ZIP
+      const shapesEntry = zip.getEntry('shapes.txt');
+      if (shapesEntry) {
+        const text = shapesEntry.getData().toString('utf8');
         const lines = text.split('\n').filter(line => line.trim());
         
-        if (lines.length === 0) continue;
+        if (lines.length > 0) {
         
         const headers = parseCSVLine(lines[0]);
         const shapeIdIndex = headers.indexOf('shape_id');
@@ -112,7 +117,7 @@ async function fetchShapes(): Promise<Map<string, [number, number][]>> {
           }
           
           if (shapesMap.size > 0) {
-            console.log('✅ Successfully loaded shapes.txt:', {
+            console.log('Successfully loaded shapes.txt:', {
               totalShapes: shapesMap.size,
               source: url,
             });
@@ -122,15 +127,17 @@ async function fetchShapes(): Promise<Map<string, [number, number][]>> {
             return shapesMap;
           }
         }
+        }
+      } else {
+        console.warn('shapes.txt not found in GTFS ZIP file');
       }
-    } catch (err) {
-      console.error(`Failed to fetch shapes.txt from ${url}:`, err);
-      continue;
     }
+  } catch (err) {
+    console.error(`Failed to fetch and extract GTFS ZIP:`, err);
   }
 
   // Fallback: Return empty map if we can't fetch
-  console.warn('⚠️ Could not load shapes.txt from any source.');
+  console.warn('Could not load shapes.txt from any source.');
   shapesCache = shapesMap;
   cacheTimestamp = now;
   return shapesMap;

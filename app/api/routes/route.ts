@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import AdmZip from 'adm-zip';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 3600; // Cache for 1 hour
@@ -28,26 +29,30 @@ async function fetchRouteTypes(): Promise<Map<string, number>> {
 
   const routeMap = new Map<string, number>();
 
-  // Try to fetch routes.txt directly (some feeds expose it)
-  const routesTxtUrls = [
-    'https://gtfsrt.api.translink.com.au/GTFS/SEQ/routes.txt',
-    'https://transitfeeds.com/p/translink/21/latest/download/routes.txt',
-  ];
+  // Download and extract GTFS ZIP file
+  const gtfsZipUrl = 'https://gtfsrt.api.translink.com.au/GTFS/SEQ_GTFS.zip';
 
-  for (const url of routesTxtUrls) {
-    try {
-      const response = await fetch(url, {
-        headers: {
-          'Accept': 'text/csv, text/plain, */*',
-        },
-        next: { revalidate: 3600 },
-      });
+  try {
+    console.log('Downloading GTFS ZIP file from:', gtfsZipUrl);
+    const response = await fetch(gtfsZipUrl, {
+      headers: {
+        'Accept': 'application/zip, application/x-zip-compressed, */*',
+      },
+      next: { revalidate: 3600 },
+    });
 
-      if (response.ok) {
-        const text = await response.text();
+    if (response.ok) {
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const zip = new AdmZip(buffer);
+      
+      // Extract routes.txt from the ZIP
+      const routesEntry = zip.getEntry('routes.txt');
+      if (routesEntry) {
+        const text = routesEntry.getData().toString('utf8');
         const lines = text.split('\n').filter(line => line.trim());
         
-        if (lines.length === 0) continue;
+        if (lines.length > 0) {
         
         // Parse CSV header - handle quoted fields
         const parseCSVLine = (line: string): string[] => {
@@ -106,7 +111,7 @@ async function fetchRouteTypes(): Promise<Map<string, number>> {
               else typeCounts.other++;
             });
             
-            console.log('✅ Successfully loaded routes.txt:', {
+            console.log('Successfully loaded routes.txt:', {
               totalRoutes: routeMap.size,
               trains: typeCounts.train,
               buses: typeCounts.bus,
@@ -120,15 +125,17 @@ async function fetchRouteTypes(): Promise<Map<string, number>> {
             return routeMap;
           }
         }
+        }
+      } else {
+        console.warn('routes.txt not found in GTFS ZIP file');
       }
-    } catch (err) {
-      console.error(`Failed to fetch routes.txt from ${url}:`, err);
-      continue;
     }
+  } catch (err) {
+    console.error(`Failed to fetch and extract GTFS ZIP:`, err);
   }
 
   // Fallback: Return empty map if we can't fetch
-  console.warn('⚠️ Could not load routes.txt from any source. Route type classification will use fallback patterns.');
+  console.warn('Could not load routes.txt from any source. Route type classification will use fallback patterns.');
   routeTypeCache = routeMap;
   cacheTimestamp = now;
   return routeMap;

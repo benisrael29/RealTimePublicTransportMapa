@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline, useMapEvents } from 'react-leaflet';
+import type { Polyline as LeafletPolyline } from 'leaflet';
 import L from 'leaflet';
 
 type VehicleType = 'bus' | 'train' | 'ferry' | 'unknown';
@@ -28,10 +29,11 @@ interface RouteShape {
   routeId: string;
   coordinates: [number, number][];
   routeType: number;
+  vehicleType?: VehicleType;
 }
 
 const VEHICLE_COLORS = {
-  bus: '#FFD60A',      // Yellow
+  bus: '#D4B000',      // Darker Yellow
   train: '#34C759',    // Green
   ferry: '#007AFF',    // Blue
   unknown: '#8E8E93',  // Gray
@@ -146,13 +148,13 @@ const getVehicleColor = (type: VehicleType): string => {
 };
 
 // Small dot icon for default state
-const createSmallDotIcon = (color: string = '#007AFF') => {
+const createSmallDotIcon = (color: string = '#007AFF', opacity: number = 0.75) => {
   const size = 8;
   return L.divIcon({
     className: 'vehicle-marker-dot',
     html: `
       <svg width="${size}" height="${size}" viewBox="0 0 8 8" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="4" cy="4" r="3.5" fill="${color}" stroke="white" stroke-width="1" opacity="0.95"/>
+        <circle cx="4" cy="4" r="3.5" fill="${color}" stroke="white" stroke-width="1" opacity="${opacity}"/>
       </svg>
     `,
     iconSize: [size, size],
@@ -162,12 +164,12 @@ const createSmallDotIcon = (color: string = '#007AFF') => {
 };
 
 // Large detailed icon for active/clicked state
-const createLargeVehicleIcon = (color: string = '#007AFF', type: VehicleType = 'unknown') => {
+const createLargeVehicleIcon = (color: string = '#007AFF', type: VehicleType = 'unknown', opacity: number = 0.9) => {
   const size = 40;
   
   const icons = {
     bus: `
-      <svg width="${size}" height="${size}" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+      <svg width="${size}" height="${size}" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="opacity:${opacity}">
         <defs>
           <filter id="shadow-bus-${color}" x="-50%" y="-50%" width="200%" height="200%">
             <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
@@ -191,7 +193,7 @@ const createLargeVehicleIcon = (color: string = '#007AFF', type: VehicleType = '
       </svg>
     `,
     train: `
-      <svg width="${size}" height="${size}" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+      <svg width="${size}" height="${size}" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="opacity:${opacity}">
         <defs>
           <filter id="shadow-train-${color}" x="-50%" y="-50%" width="200%" height="200%">
             <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
@@ -216,7 +218,7 @@ const createLargeVehicleIcon = (color: string = '#007AFF', type: VehicleType = '
       </svg>
     `,
     ferry: `
-      <svg width="${size}" height="${size}" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+      <svg width="${size}" height="${size}" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="opacity:${opacity}">
         <defs>
           <filter id="shadow-ferry-${color}" x="-50%" y="-50%" width="200%" height="200%">
             <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
@@ -238,7 +240,7 @@ const createLargeVehicleIcon = (color: string = '#007AFF', type: VehicleType = '
       </svg>
     `,
     unknown: `
-      <svg width="${size}" height="${size}" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+      <svg width="${size}" height="${size}" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="opacity:${opacity}">
         <circle cx="20" cy="20" r="10" fill="${color}" stroke="white" stroke-width="2.5" filter="drop-shadow(0 2px 6px rgba(0,0,0,0.4))"/>
       </svg>
     `,
@@ -254,20 +256,6 @@ const createLargeVehicleIcon = (color: string = '#007AFF', type: VehicleType = '
 };
 
 function MapUpdater({ vehicles, isInitialLoad }: { vehicles: VehiclePosition[]; isInitialLoad: boolean }) {
-  const map = useMap();
-  
-  useEffect(() => {
-    if (vehicles.length > 0 && isInitialLoad) {
-      const bounds = L.latLngBounds(
-        vehicles.map(v => [v.latitude, v.longitude] as [number, number])
-      );
-      map.fitBounds(bounds, { 
-        padding: [80, 80],
-        maxZoom: 15
-      });
-    }
-  }, [vehicles, map, isInitialLoad]);
-
   return null;
 }
 
@@ -277,6 +265,56 @@ function MapClickHandler({ onMapClick }: { onMapClick: () => void }) {
   });
   return null;
 }
+
+function RoutePolyline({ route }: { route: RouteShape }) {
+  const polylineRef = useRef<LeafletPolyline | null>(null);
+  const map = useMap();
+
+  useEffect(() => {
+    if (polylineRef.current && route.coordinates) {
+      console.log('Updating polyline with', route.coordinates.length, 'coordinates');
+      polylineRef.current.setLatLngs(route.coordinates);
+      
+      // Fit map bounds to show the entire route
+      try {
+        const bounds = L.latLngBounds(route.coordinates);
+        console.log('Fitting map to bounds:', bounds);
+        map.fitBounds(bounds, { 
+          padding: [50, 50],
+          maxZoom: 14
+        });
+      } catch (err) {
+        console.error('Error fitting bounds:', err);
+      }
+    }
+  }, [route.coordinates, map]);
+
+  const color = getVehicleColor(
+    route.vehicleType ?? getVehicleTypeFromRouteType(route.routeType)
+  );
+  
+  console.log('RoutePolyline rendering with:', {
+    routeId: route.routeId,
+    coordinateCount: route.coordinates.length,
+    firstCoord: route.coordinates[0],
+    color,
+  });
+
+  return (
+    <Polyline
+      ref={polylineRef}
+      positions={route.coordinates}
+      pathOptions={{
+        color: color,
+        weight: 6,
+        opacity: 0.75,
+        lineCap: 'round',
+        lineJoin: 'round',
+      }}
+    />
+  );
+}
+
 
 export default function TransportMap() {
   const [vehicles, setVehicles] = useState<VehiclePosition[]>([]);
@@ -349,33 +387,48 @@ export default function TransportMap() {
   };
 
   const handleVehicleClick = async (vehicle: VehiclePosition) => {
+    console.log('Vehicle clicked:', vehicle);
+    
     if (!vehicle.routeId) {
       setRouteError('No route ID available for this vehicle');
       return;
     }
-
-    // Toggle: if same route is already displayed, hide it
-    if (displayedRoute?.routeId === vehicle.routeId) {
-      setDisplayedRoute(null);
-      setRouteError(null);
-      return;
-    }
+    const effectiveVehicleType =
+      vehicle.vehicleType ??
+      (vehicle.routeType !== undefined && vehicle.routeType !== null
+        ? getVehicleTypeFromRouteType(vehicle.routeType)
+        : getVehicleTypeFallback(vehicle.routeId, vehicle.tripId, vehicle.id));
 
     // Fetch route shape
     setLoadingRoute(true);
     setRouteError(null);
     
     try {
-      const response = await fetch(`/api/route-shape/${encodeURIComponent(vehicle.routeId)}`);
+      const url = `/api/route-shape/${encodeURIComponent(vehicle.routeId)}`;
+      console.log('Fetching route from:', url);
+      
+      const response = await fetch(url);
       const data = await response.json();
       
+      console.log('Route response:', data);
+      
       if (data.error) {
+        console.error('Route error:', data.error);
         setRouteError(data.error);
         setDisplayedRoute(null);
       } else {
-        setDisplayedRoute(data);
+        console.log('Setting displayed route with', data.coordinates?.length, 'coordinates');
+        setDisplayedRoute({
+          ...data,
+          routeType:
+            vehicle.routeType !== undefined && vehicle.routeType !== null
+              ? vehicle.routeType
+              : data.routeType,
+          vehicleType: effectiveVehicleType,
+        });
       }
     } catch (err) {
+      console.error('Failed to fetch route:', err);
       setRouteError(err instanceof Error ? err.message : 'Failed to load route');
       setDisplayedRoute(null);
     } finally {
@@ -386,7 +439,20 @@ export default function TransportMap() {
   const handleMapClick = () => {
     setDisplayedRoute(null);
     setRouteError(null);
+    setSelectedVehicleId(null);
   };
+
+  useEffect(() => {
+    if (displayedRoute) {
+      console.log('DisplayedRoute state updated:', {
+        routeId: displayedRoute.routeId,
+        coordinateCount: displayedRoute.coordinates?.length,
+        routeType: displayedRoute.routeType,
+      });
+    } else {
+      console.log('DisplayedRoute cleared');
+    }
+  }, [displayedRoute]);
 
   useEffect(() => {
     fetchVehicles();
@@ -406,7 +472,7 @@ export default function TransportMap() {
     <div className="w-full h-screen relative overflow-hidden">
       <MapContainer
         center={[-27.4698, 153.0251]}
-        zoom={13}
+        zoom={12}
         style={{ height: '100%', width: '100%' }}
         scrollWheelZoom={true}
         zoomControl={true}
@@ -419,15 +485,8 @@ export default function TransportMap() {
           subdomains="abcd"
         />
         <MapUpdater vehicles={vehicles} isInitialLoad={isInitialLoad} />
-        {displayedRoute && (
-          <Polyline
-            positions={displayedRoute.coordinates}
-            pathOptions={{
-              color: getVehicleColor(getVehicleTypeFromRouteType(displayedRoute.routeType)),
-              weight: 4,
-              opacity: 0.7,
-            }}
-          />
+        {displayedRoute && displayedRoute.coordinates && displayedRoute.coordinates.length > 0 && (
+          <RoutePolyline route={displayedRoute} />
         )}
         {vehicles.map((vehicle) => {
           const vehicleType = vehicle.vehicleType || 
@@ -438,10 +497,11 @@ export default function TransportMap() {
           const color = getVehicleColor(vehicleType);
           const typeLabel = vehicleType.charAt(0).toUpperCase() + vehicleType.slice(1);
           const isSelected = selectedVehicleId === vehicle.id;
+          const isRouteDisplayed = !!displayedRoute;
           
           const markerIcon = isSelected 
-            ? createLargeVehicleIcon(color, vehicleType)
-            : createSmallDotIcon(color);
+            ? createLargeVehicleIcon(color, vehicleType, 0.9)
+            : createSmallDotIcon(color, isRouteDisplayed ? 0.25 : 0.75);
           
           return (
             <Marker
@@ -451,6 +511,7 @@ export default function TransportMap() {
               eventHandlers={{
                 click: () => {
                   setSelectedVehicleId(vehicle.id);
+                  handleVehicleClick(vehicle);
                 },
               }}
             >
@@ -459,6 +520,8 @@ export default function TransportMap() {
               eventHandlers={{
                 remove: () => {
                   setSelectedVehicleId(null);
+                  setDisplayedRoute(null);
+                  setRouteError(null);
                 },
               }}
             >
@@ -494,15 +557,6 @@ export default function TransportMap() {
                           return `Route ${route}`;
                         })()}
                       </div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleVehicleClick(vehicle);
-                        }}
-                        className="mt-2 text-xs text-blue-600 hover:text-blue-800 underline"
-                      >
-                        {displayedRoute?.routeId === vehicle.routeId ? 'Hide route' : 'Show route'}
-                      </button>
                     </div>
                   )}
                   
@@ -513,14 +567,14 @@ export default function TransportMap() {
                         <span className="text-sm font-medium text-gray-800">
                           {(() => {
                             const dir = vehicle.bearing!;
-                            if (dir >= 337.5 || dir < 22.5) return '⬆️ North';
-                            if (dir >= 22.5 && dir < 67.5) return '↗️ Northeast';
-                            if (dir >= 67.5 && dir < 112.5) return '➡️ East';
-                            if (dir >= 112.5 && dir < 157.5) return '↘️ Southeast';
-                            if (dir >= 157.5 && dir < 202.5) return '⬇️ South';
-                            if (dir >= 202.5 && dir < 247.5) return '↙️ Southwest';
-                            if (dir >= 247.5 && dir < 292.5) return '⬅️ West';
-                            return '↖️ Northwest';
+                            if (dir >= 337.5 || dir < 22.5) return 'North';
+                            if (dir >= 22.5 && dir < 67.5) return 'Northeast';
+                            if (dir >= 67.5 && dir < 112.5) return 'East';
+                            if (dir >= 112.5 && dir < 157.5) return 'Southeast';
+                            if (dir >= 157.5 && dir < 202.5) return 'South';
+                            if (dir >= 202.5 && dir < 247.5) return 'Southwest';
+                            if (dir >= 247.5 && dir < 292.5) return 'West';
+                            return 'Northwest';
                           })()}
                         </span>
                       </div>
@@ -545,7 +599,7 @@ export default function TransportMap() {
       {error && (
         <div className="absolute top-6 left-1/2 -translate-x-1/2 bg-red-50/95 backdrop-blur-xl px-6 py-3 rounded-2xl shadow-2xl z-[1000] border border-red-200/50 max-w-sm">
           <div className="flex items-start gap-3">
-            <div className="text-red-500 text-xl">⚠️</div>
+            <div className="text-red-500 text-xl">!</div>
             <div>
               <p className="text-sm font-semibold text-red-800 mb-1">Connection Error</p>
               <p className="text-xs text-red-600">{error}</p>
@@ -566,7 +620,7 @@ export default function TransportMap() {
       {routeError && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-yellow-50/95 backdrop-blur-xl px-4 py-2 rounded-xl shadow-lg z-[1000] border border-yellow-200/50 max-w-sm">
           <div className="flex items-start gap-2">
-            <div className="text-yellow-600 text-sm">ℹ️</div>
+            <div className="text-yellow-600 text-sm">i</div>
             <p className="text-xs text-yellow-800">{routeError}</p>
           </div>
         </div>

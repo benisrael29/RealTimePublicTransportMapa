@@ -108,7 +108,7 @@ export async function GET() {
         const vehicles = await fetchVehiclePositionsFromEndpoint(endpoint, routeTypes);
         if (vehicles.length > 0) {
           allVehicles = vehicles;
-          console.log(`✅ Successfully fetched ${vehicles.length} vehicles from main endpoint: ${endpoint}`);
+          console.log(`Successfully fetched ${vehicles.length} vehicles from main endpoint: ${endpoint}`);
           break;
         }
       } catch (err) {
@@ -123,7 +123,7 @@ export async function GET() {
       try {
         const vehicles = await fetchVehiclePositionsFromEndpoint(endpoint, routeTypes);
         if (vehicles.length > 0) {
-          console.log(`✅ Found ${vehicles.length} rail vehicles from: ${endpoint}`);
+          console.log(`Found ${vehicles.length} rail vehicles from: ${endpoint}`);
           // Merge with existing vehicles (avoid duplicates by ID)
           const existingIds = new Set(allVehicles.map(v => v.id));
           const newVehicles = vehicles.filter(v => !existingIds.has(v.id));
@@ -200,7 +200,7 @@ export async function GET() {
       });
       
       if (potentialTrainRoutes.length > 0) {
-        console.log('⚠️ Potential train routes not classified as type 2:', potentialTrainRoutes.slice(0, 20));
+        console.log('Potential train routes not classified as type 2:', potentialTrainRoutes.slice(0, 20));
       }
       
       return NextResponse.json({ vehicles: allVehicles, timestamp: Date.now() });
