@@ -1,19 +1,39 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline, useMapEvents, Rectangle } from 'react-leaflet';
+import type { ReactElement } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline, useMapEvents, CircleMarker, Rectangle } from 'react-leaflet';
 import type {
   LatLngLiteral,
   Map as LeafletMap,
   Polyline as LeafletPolyline,
   LeafletEventHandlerFnMap,
   Marker as LeafletMarker,
+  LeafletMouseEvent,
 } from 'leaflet';
 import L from 'leaflet';
+import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
+import markerIcon from 'leaflet/dist/images/marker-icon.png';
+import markerShadow from 'leaflet/dist/images/marker-shadow.png';
+
+delete (L.Icon.Default.prototype as unknown as { _getIconUrl?: unknown })._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: (markerIcon2x as unknown as { src?: string }).src ?? (markerIcon2x as unknown as string),
+  iconUrl: (markerIcon as unknown as { src?: string }).src ?? (markerIcon as unknown as string),
+  shadowUrl: (markerShadow as unknown as { src?: string }).src ?? (markerShadow as unknown as string),
+});
 
 type VehicleType = 'bus' | 'train' | 'ferry' | 'unknown';
 
 type OutageType = 'unplanned' | 'planned_current' | 'planned_future';
+
+type HousingMetric = 'rent' | 'mortgage';
+
+type HousingLegend = {
+  metric: HousingMetric;
+  breaks: number[];
+  colors: string[];
+} | null;
 
 type PowerOutageFeature = {
   type: 'Feature';
@@ -314,6 +334,54 @@ const createLargeVehicleIcon = (color: string = '#007AFF', type: VehicleType = '
   });
 };
 
+const getQldTrafficClosureColor = (props: any) => {
+  const impactSubtype = typeof props?.impact?.impact_subtype === 'string' ? props.impact.impact_subtype : '';
+  const impactType = typeof props?.impact?.impact_type === 'string' ? props.impact.impact_type : '';
+  const s = impactSubtype.toLowerCase();
+  const full = s.includes('closed') && (s.includes('all') || s.includes('to all'));
+  if (full) return '#FF3B30';
+  if (impactType === 'Closures') return '#FF9F0A';
+  return '#8E8E93';
+};
+
+const createIosRoadClosurePinIcon = (color: string) => {
+  const size = 34;
+  const border = 'rgba(255,255,255,0.95)';
+  return L.divIcon({
+    className: 'ios-closure-pin',
+    html: `
+      <svg width="${size}" height="${size}" viewBox="0 0 34 34" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs>
+          <filter id="iosShadow" x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur in="SourceAlpha" stdDeviation="2.2" />
+            <feOffset dx="0" dy="2" result="off" />
+            <feComponentTransfer>
+              <feFuncA type="linear" slope="0.28" />
+            </feComponentTransfer>
+            <feMerge>
+              <feMergeNode />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          <linearGradient id="iosGloss" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="rgba(255,255,255,0.75)" />
+            <stop offset="0.55" stop-color="rgba(255,255,255,0.15)" />
+            <stop offset="1" stop-color="rgba(255,255,255,0)" />
+          </linearGradient>
+        </defs>
+        <g filter="url(#iosShadow)">
+          <circle cx="17" cy="17" r="12.5" fill="${color}" stroke="${border}" stroke-width="2.5" />
+          <circle cx="17" cy="17" r="12.5" fill="url(#iosGloss)" />
+          <path d="M17 8.7c-4.6 0-8.3 3.7-8.3 8.3s3.7 8.3 8.3 8.3 8.3-3.7 8.3-8.3-3.7-8.3-8.3-8.3Zm0 4.3c.7 0 1.2.5 1.2 1.2v4.7c0 .7-.5 1.2-1.2 1.2s-1.2-.5-1.2-1.2v-4.7c0-.7.5-1.2 1.2-1.2Zm0 9.6a1.35 1.35 0 1 1 0-2.7 1.35 1.35 0 0 1 0 2.7Z" fill="white" opacity="0.98"/>
+        </g>
+      </svg>
+    `,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+    popupAnchor: [0, -size / 2],
+  });
+};
+
 function AnimatedMarker({ 
   position, 
   icon, 
@@ -442,9 +510,9 @@ function MapUpdater({ mapRef }: { mapRef: React.MutableRefObject<LeafletMap | nu
   return null;
 }
 
-function MapClickHandler({ onMapClick }: { onMapClick: () => void }) {
+function MapClickHandler({ onMapClick }: { onMapClick: (latlng: LatLngLiteral) => void }) {
   useMapEvents({
-    click: onMapClick,
+    click: (e: LeafletMouseEvent) => onMapClick(e.latlng),
   });
   return null;
 }
@@ -552,6 +620,82 @@ class StopSpatialIndex {
     if (!foundAny || !Number.isFinite(bestSq)) return null;
     return Math.sqrt(bestSq);
   }
+
+  countWithinRadiusMeters(lat: number, lon: number, radiusMeters: number): number {
+    if (this.bins.size === 0) return 0;
+    const { x, y } = mercatorProjectMeters(lat, lon);
+    const ix0 = Math.floor(x / this.binSizeMeters);
+    const iy0 = Math.floor(y / this.binSizeMeters);
+    const rBins = Math.max(0, Math.ceil(radiusMeters / this.binSizeMeters));
+    const r2 = radiusMeters * radiusMeters;
+
+    let count = 0;
+    for (let dx = -rBins; dx <= rBins; dx++) {
+      for (let dy = -rBins; dy <= rBins; dy++) {
+        const key = `${ix0 + dx},${iy0 + dy}`;
+        const bucket = this.bins.get(key);
+        if (!bucket) continue;
+        for (const pt of bucket) {
+          const ddx = pt.x - x;
+          const ddy = pt.y - y;
+          const sq = ddx * ddx + ddy * ddy;
+          if (sq <= r2) count++;
+        }
+      }
+    }
+    return count;
+  }
+
+  nearestK(lat: number, lon: number, k: number): Array<{ id: string; meters: number }> {
+    if (this.bins.size === 0) return [];
+    const { x, y } = mercatorProjectMeters(lat, lon);
+    const ix0 = Math.floor(x / this.binSizeMeters);
+    const iy0 = Math.floor(y / this.binSizeMeters);
+
+    const kk = Math.max(1, Math.min(32, Math.floor(k)));
+    const best: Array<{ id: string; sq: number }> = [];
+    let bestMaxSq = Number.POSITIVE_INFINITY;
+
+    for (let r = 0; r <= 48; r++) {
+      const minPossible = Math.max(0, r * this.binSizeMeters);
+      if (best.length >= kk && minPossible * minPossible > bestMaxSq) break;
+
+      for (let dx = -r; dx <= r; dx++) {
+        for (let dy = -r; dy <= r; dy++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          const key = `${ix0 + dx},${iy0 + dy}`;
+          const bucket = this.bins.get(key);
+          if (!bucket) continue;
+          for (const pt of bucket) {
+            const ddx = pt.x - x;
+            const ddy = pt.y - y;
+            const sq = ddx * ddx + ddy * ddy;
+            if (best.length < kk) {
+              best.push({ id: pt.id, sq });
+              if (best.length === kk) {
+                bestMaxSq = best.reduce((m, v) => (v.sq > m ? v.sq : m), 0);
+              }
+            } else if (sq < bestMaxSq) {
+              let worstIdx = 0;
+              let worstSq = best[0].sq;
+              for (let i = 1; i < best.length; i++) {
+                if (best[i].sq > worstSq) {
+                  worstSq = best[i].sq;
+                  worstIdx = i;
+                }
+              }
+              best[worstIdx] = { id: pt.id, sq };
+              bestMaxSq = best.reduce((m, v) => (v.sq > m ? v.sq : m), 0);
+            }
+          }
+        }
+      }
+    }
+
+    if (best.length === 0) return [];
+    best.sort((a, b) => a.sq - b.sq);
+    return best.map((b) => ({ id: b.id, meters: Math.sqrt(b.sq) }));
+  }
 }
 
 const heatColorForDistance = (meters: number, maxMeters: number) => {
@@ -576,83 +720,88 @@ const heatColorForDistance = (meters: number, maxMeters: number) => {
 function AccessibilityHeatmapLayer({
   enabled,
   stops,
+  userLocation,
 }: {
   enabled: boolean;
   stops: Stop[];
+  userLocation: LatLngLiteral | null;
 }) {
-  const map = useMap();
-  const [, setUpdateCounter] = useState(0);
-  
   const index = useMemo(() => {
     if (!enabled || stops.length === 0) return null;
-    console.log('Building spatial index with', stops.length, 'stops');
     return new StopSpatialIndex(stops, 900);
   }, [enabled, stops]);
 
-  useEffect(() => {
-    if (!enabled || !index) return;
+  const cells = useMemo(() => {
+    if (!enabled || !index || !userLocation) return null;
 
-    console.log('Adding heatmap layer to map');
+    const radiusMeters = 3000;
+    const gridSize = 42;
+    const maxMeters = radiusMeters;
 
-    const update = () => {
-      setUpdateCounter(c => c + 1);
-    };
+    const lat = userLocation.lat;
+    const lng = userLocation.lng;
+    const latDelta = radiusMeters / 111_320;
+    const cosLat = Math.max(0.15, Math.cos((lat * Math.PI) / 180));
+    const lngDelta = radiusMeters / (111_320 * cosLat);
 
-    map.on('moveend', update);
-    map.on('zoomend', update);
-    
-    return () => {
-      console.log('Removing heatmap layer from map');
-      map.off('moveend', update);
-      map.off('zoomend', update);
-    };
-  }, [enabled, index, map]);
+    const latMin = lat - latDelta;
+    const latMax = lat + latDelta;
+    const lngMin = lng - lngDelta;
+    const lngMax = lng + lngDelta;
 
-  if (!enabled || !index) return null;
+    const latStep = (latMax - latMin) / gridSize;
+    const lngStep = (lngMax - lngMin) / gridSize;
 
-  const bounds = map.getBounds();
-  const nw = bounds.getNorthWest();
-  const se = bounds.getSouthEast();
+    const out: ReactElement[] = [];
+    for (let i = 0; i < gridSize; i++) {
+      for (let j = 0; j < gridSize; j++) {
+        const cLat = latMin + (i + 0.5) * latStep;
+        const cLng = lngMin + (j + 0.5) * lngStep;
 
-  const gridSize = 100;
-  const cells = [];
-  const maxMeters = 3000;
+        const d0 = index.nearestDistanceMeters(cLat, cLng);
+        const d = d0 === null ? maxMeters : Math.min(d0, maxMeters);
+        const { r, g, b } = heatColorForDistance(d, maxMeters);
 
-  const latStep = (se.lat - nw.lat) / gridSize;
-  const lngStep = (se.lng - nw.lng) / gridSize;
+        const swLat = latMin + i * latStep;
+        const swLng = lngMin + j * lngStep;
+        const neLat = latMin + (i + 1) * latStep;
+        const neLng = lngMin + (j + 1) * lngStep;
 
-  for (let i = 0; i < gridSize; i++) {
-    for (let j = 0; j < gridSize; j++) {
-      const lat = nw.lat + (i + 0.5) * latStep;
-      const lng = nw.lng + (j + 0.5) * lngStep;
-      
-      const d0 = index.nearestDistanceMeters(lat, lng);
-      const d = d0 === null ? maxMeters : Math.min(d0, maxMeters);
-      const { r, g, b } = heatColorForDistance(d, maxMeters);
-
-      const swLat = nw.lat + i * latStep;
-      const swLng = nw.lng + j * lngStep;
-      const neLat = nw.lat + (i + 1) * latStep;
-      const neLng = nw.lng + (j + 1) * lngStep;
-
-      cells.push(
-        <Rectangle
-          key={`cell-${i}-${j}`}
-          bounds={[[swLat, swLng], [neLat, neLng]]}
-          pathOptions={{
-            fillColor: `rgb(${r},${g},${b})`,
-            fillOpacity: 0.35,
-            stroke: false,
-            interactive: false,
-          }}
-        />
-      );
+        out.push(
+          <Rectangle
+            key={`access-local-${i}-${j}`}
+            bounds={[[swLat, swLng], [neLat, neLng]]}
+            pathOptions={{
+              fillColor: `rgb(${r},${g},${b})`,
+              fillOpacity: 0.28,
+              stroke: false,
+              interactive: false,
+            }}
+          />
+        );
+      }
     }
-  }
+    return out;
+  }, [enabled, index, userLocation?.lat, userLocation?.lng]);
 
-  console.log('Rendering', cells.length, 'heat cells');
+  return cells ? <>{cells}</> : null;
+}
 
-  return <>{cells}</>;
+function AccessibilityUserLocationLayer({
+  enabled,
+  userLocation,
+}: {
+  enabled: boolean;
+  userLocation: LatLngLiteral | null;
+}) {
+  if (!enabled || !userLocation) return null;
+  return (
+    <CircleMarker
+      center={userLocation}
+      radius={7}
+      pathOptions={{ color: '#2563EB', fillColor: '#3B82F6', fillOpacity: 0.65, weight: 2 }}
+    />
+  );
 }
 
 function PowerOutageLayer({ enabled }: { enabled: boolean }) {
@@ -820,11 +969,9 @@ function QldTrafficClosuresLayer({ enabled }: { enabled: boolean }) {
 
     const styleFor = (props: any): L.PathOptions => {
       const impactSubtype = typeof props?.impact?.impact_subtype === 'string' ? props.impact.impact_subtype : '';
-      const impactType = typeof props?.impact?.impact_type === 'string' ? props.impact.impact_type : '';
-      const full =
-        impactSubtype.toLowerCase().includes('closed') &&
-        (impactSubtype.toLowerCase().includes('all') || impactSubtype.toLowerCase().includes('to all'));
-      const color = full ? '#FF3B30' : impactType === 'Closures' ? '#FF9F0A' : '#8E8E93';
+      const s = impactSubtype.toLowerCase();
+      const full = s.includes('closed') && (s.includes('all') || s.includes('to all'));
+      const color = getQldTrafficClosureColor(props);
       return { color, weight: 5, opacity: 0.85, dashArray: full ? undefined : '8 8' };
     };
 
@@ -859,6 +1006,12 @@ function QldTrafficClosuresLayer({ enabled }: { enabled: boolean }) {
       const layer = L.geoJSON(geojson, {
         pane: 'overlayPane',
         style: (feature) => styleFor((feature as any)?.properties ?? {}),
+        pointToLayer: (feature, latlng) => {
+          const props = (feature as any)?.properties ?? {};
+          const color = getQldTrafficClosureColor(props);
+          const icon = createIosRoadClosurePinIcon(color);
+          return L.marker(latlng, { icon });
+        },
         onEachFeature: (feature, l) => {
           const props = (feature as any)?.properties ?? {};
           l.bindPopup(buildPopupHtml(props), { className: 'ios-popup' });
@@ -1005,17 +1158,188 @@ function BccRoadOccupanciesLayer({ enabled }: { enabled: boolean }) {
   return null;
 }
 
+function HousingChoroplethLayer({
+  enabled,
+  metric,
+  onLegend,
+}: {
+  enabled: boolean;
+  metric: HousingMetric;
+  onLegend: (legend: HousingLegend) => void;
+}) {
+  const map = useMap();
+  const layerRef = useRef<L.GeoJSON | null>(null);
+
+  useEffect(() => {
+    if (!enabled) {
+      if (layerRef.current) {
+        layerRef.current.removeFrom(map);
+        layerRef.current = null;
+      }
+      onLegend(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const pickVal = (props: Record<string, unknown> | undefined | null) => {
+      const k = metric === 'rent' ? 'median_weekly_rent' : 'median_monthly_mortgage';
+      const v = props?.[k];
+      return typeof v === 'number' && Number.isFinite(v) ? v : null;
+    };
+
+    const computeLegend = (
+      features: Array<{ properties?: Record<string, unknown> | null }>
+    ): { metric: HousingMetric; breaks: number[]; colors: string[] } => {
+      const values = features
+        .map((f) => pickVal(f.properties))
+        .filter((v): v is number => v !== null)
+        .sort((a, b) => a - b);
+
+      if (values.length === 0) {
+        return { metric, breaks: [], colors: [] };
+      }
+
+      const quantile = (p: number) => {
+        const n = values.length;
+        if (n === 1) return values[0];
+        const idx = (n - 1) * p;
+        const lo = Math.floor(idx);
+        const hi = Math.ceil(idx);
+        if (lo === hi) return values[lo];
+        const t = idx - lo;
+        return values[lo] * (1 - t) + values[hi] * t;
+      };
+
+      const breaks = [quantile(0.2), quantile(0.4), quantile(0.6), quantile(0.8), quantile(1)];
+      const colors = ['#E0F2FE', '#BAE6FD', '#7DD3FC', '#38BDF8', '#0284C7', '#075985'];
+
+      return { metric, breaks, colors };
+    };
+
+    const getFillColor = (v: number | null, legend: { breaks: number[]; colors: string[] }) => {
+      if (v === null) return '#E5E7EB';
+      const [b1, b2, b3, b4, b5] = legend.breaks;
+      if (v <= b1) return legend.colors[0];
+      if (v <= b2) return legend.colors[1];
+      if (v <= b3) return legend.colors[2];
+      if (v <= b4) return legend.colors[3];
+      if (v <= b5) return legend.colors[4];
+      return legend.colors[5];
+    };
+
+    const money = (v: unknown) =>
+      typeof v === 'number' && Number.isFinite(v) ? `$${v.toLocaleString('en-AU')}` : '—';
+
+    const fetchAndRender = async () => {
+      try {
+        const resp = await fetch('/api/housing');
+        const geojson = (await resp.json()) as { type?: string; features?: any[] };
+        const features = Array.isArray(geojson?.features) ? geojson.features : [];
+
+        const legend = computeLegend(features);
+        if (!cancelled) onLegend(legend);
+
+        if (layerRef.current) {
+          layerRef.current.removeFrom(map);
+          layerRef.current = null;
+        }
+
+        const layer = L.geoJSON(geojson as any, {
+          pane: 'overlayPane',
+          style: (feature) => {
+            const props = (feature as any)?.properties as Record<string, unknown> | undefined;
+            const v = pickVal(props);
+            return {
+              color: '#111827',
+              weight: 1,
+              opacity: 0.35,
+              fillColor: getFillColor(v, legend),
+              fillOpacity: 0.45,
+            } as L.PathOptions;
+          },
+          onEachFeature: (feature, l) => {
+            const props = (feature as any)?.properties as Record<string, unknown> | undefined;
+            const suburb = typeof props?.suburb === 'string' ? props.suburb : 'Suburb';
+            const rent = money(props?.median_weekly_rent);
+            const mortgage = money(props?.median_monthly_mortgage);
+            const activeKey = metric === 'rent' ? 'rent' : 'mortgage';
+
+            const html = `
+              <div style="padding:10px;min-width:240px;">
+                <div style="font-weight:700;font-size:14px;color:#111827;margin-bottom:8px;">${suburb}</div>
+                <div style="display:flex;flex-direction:column;gap:6px;">
+                  <div style="display:flex;justify-content:space-between;gap:12px;">
+                    <div style="color:#6B7280;font-size:12px;">Median weekly rent</div>
+                    <div style="color:#111827;font-size:12px;font-weight:${activeKey === 'rent' ? 700 : 600};">${rent}</div>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;gap:12px;">
+                    <div style="color:#6B7280;font-size:12px;">Median monthly mortgage</div>
+                    <div style="color:#111827;font-size:12px;font-weight:${activeKey === 'mortgage' ? 700 : 600};">${mortgage}</div>
+                  </div>
+                </div>
+                <div style="margin-top:10px;color:#9CA3AF;font-size:11px;">Source: ABS Census 2021 (QuickStats)</div>
+              </div>
+            `;
+
+            l.bindPopup(html, { className: 'ios-popup' });
+
+            l.on('mouseover', () => {
+              (l as any).setStyle?.({ weight: 2, opacity: 0.7 });
+            });
+            l.on('mouseout', () => {
+              (l as any).setStyle?.({ weight: 1, opacity: 0.35 });
+            });
+          },
+        });
+
+        layer.addTo(map);
+        layerRef.current = layer;
+      } catch {
+        if (!cancelled) onLegend(null);
+      }
+    };
+
+    void fetchAndRender();
+
+    return () => {
+      cancelled = true;
+      if (layerRef.current) {
+        layerRef.current.removeFrom(map);
+        layerRef.current = null;
+      }
+    };
+  }, [enabled, map, metric, onLegend]);
+
+  return null;
+}
+
 
 export default function TransportMap() {
   const [vehicles, setVehicles] = useState<VehiclePosition[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showLiveTransit, setShowLiveTransit] = useState(true);
   const [showInfo, setShowInfo] = useState(false);
+  const [showLayersMenu, setShowLayersMenu] = useState(false);
   const [showAccessibility, setShowAccessibility] = useState(false);
+  const [accessUserLocation, setAccessUserLocation] = useState<LatLngLiteral | null>(null);
+  const [accessLocating, setAccessLocating] = useState(false);
+  const [accessLocationError, setAccessLocationError] = useState<string | null>(null);
+  const [accessNearestStopMeters, setAccessNearestStopMeters] = useState<number | null>(null);
+  const [accessStopsWithin, setAccessStopsWithin] = useState<{ m500: number; m1000: number; m2000: number } | null>(
+    null
+  );
   const [showPowerOutages, setShowPowerOutages] = useState(false);
-  const [showRoadClosuresPanel, setShowRoadClosuresPanel] = useState(false);
   const [showBccRoadClosures, setShowBccRoadClosures] = useState(false);
   const [showQldTrafficClosures, setShowQldTrafficClosures] = useState(false);
+  const [showWeatherClouds, setShowWeatherClouds] = useState(false);
+  const [showWeatherPrecip, setShowWeatherPrecip] = useState(false);
+  const [showWeatherWind, setShowWeatherWind] = useState(false);
+  const [showWeatherTemp, setShowWeatherTemp] = useState(false);
+  const [showHousingOverlay, setShowHousingOverlay] = useState(false);
+  const [housingMetric, setHousingMetric] = useState<HousingMetric>('rent');
+  const [housingLegend, setHousingLegend] = useState<HousingLegend>(null);
   const [stops, setStops] = useState<Stop[]>([]);
   const [stopsLoading, setStopsLoading] = useState(false);
   const [stopsError, setStopsError] = useState<string | null>(null);
@@ -1032,6 +1356,11 @@ export default function TransportMap() {
   const iconCacheRef = useRef<Map<string, L.DivIcon>>(new Map());
   const mapRef = useRef<LeafletMap | null>(null);
   const previousMapViewRef = useRef<{ center: LatLngLiteral; zoom: number } | null>(null);
+
+  const stopIndexForAccessibility = useMemo(() => {
+    if (stops.length === 0) return null;
+    return new StopSpatialIndex(stops, 900);
+  }, [stops]);
 
   const getCachedIcon = useCallback((key: string, factory: () => L.DivIcon) => {
     const existing = iconCacheRef.current.get(key);
@@ -1074,6 +1403,39 @@ export default function TransportMap() {
     map.setView(prev.center, prev.zoom, { animate: true });
     previousMapViewRef.current = null;
   }, []);
+
+  const clearLiveTransitSelection = useCallback(() => {
+    routeRequestIdRef.current += 1;
+    restoreMapViewAfterRoute();
+    setSelectedVehicleId(null);
+    setDisplayedRoute(null);
+    setRouteError(null);
+    setRouteStops([]);
+    setRouteStopsRouteId(null);
+    setLoadingRoute(false);
+  }, [restoreMapViewAfterRoute]);
+
+  const layersMenuRef = useRef<HTMLDivElement | null>(null);
+  const [expandRoadClosures, setExpandRoadClosures] = useState(false);
+  const [expandHousing, setExpandHousing] = useState(false);
+
+  useEffect(() => {
+    if (!showLayersMenu) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowLayersMenu(false);
+    };
+    const onPointerDown = (e: MouseEvent | PointerEvent) => {
+      const el = layersMenuRef.current;
+      if (!el) return;
+      if (e.target instanceof Node && !el.contains(e.target)) setShowLayersMenu(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('pointerdown', onPointerDown);
+    };
+  }, [showLayersMenu]);
 
   const ensureStopsLoaded = useCallback(async () => {
     if (stopsLoading) return;
@@ -1270,7 +1632,7 @@ export default function TransportMap() {
     }
   };
 
-  const handleMapClick = () => {
+  const handleMapClick = (latlng: LatLngLiteral) => {
     routeRequestIdRef.current += 1;
     restoreMapViewAfterRoute();
     setDisplayedRoute(null);
@@ -1279,6 +1641,8 @@ export default function TransportMap() {
     setRouteStops([]);
     setRouteStopsRouteId(null);
     setLoadingRoute(false);
+
+    void latlng;
   };
 
   useEffect(() => {
@@ -1302,6 +1666,53 @@ export default function TransportMap() {
   }, [showAccessibility, ensureStopsLoaded]);
 
   useEffect(() => {
+    if (!showAccessibility) {
+      setAccessUserLocation(null);
+      setAccessLocationError(null);
+      setAccessLocating(false);
+      setAccessNearestStopMeters(null);
+      setAccessStopsWithin(null);
+      return;
+    }
+
+    if (accessUserLocation || accessLocating || accessLocationError) return;
+    if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
+      setAccessLocationError('Geolocation not available');
+      return;
+    }
+
+    setAccessLocating(true);
+    setAccessLocationError(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setAccessUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setAccessLocating(false);
+      },
+      (err) => {
+        setAccessLocationError(err?.message || 'Location permission denied');
+        setAccessLocating(false);
+      },
+      { enableHighAccuracy: true, maximumAge: 60_000, timeout: 8_000 }
+    );
+  }, [showAccessibility, accessUserLocation, accessLocating, accessLocationError]);
+
+  useEffect(() => {
+    if (!showAccessibility) return;
+    if (!accessUserLocation) return;
+    if (!stopIndexForAccessibility) return;
+
+    const d = stopIndexForAccessibility.nearestDistanceMeters(accessUserLocation.lat, accessUserLocation.lng);
+    setAccessNearestStopMeters(d);
+    setAccessStopsWithin({
+      m500: stopIndexForAccessibility.countWithinRadiusMeters(accessUserLocation.lat, accessUserLocation.lng, 500),
+      m1000: stopIndexForAccessibility.countWithinRadiusMeters(accessUserLocation.lat, accessUserLocation.lng, 1000),
+      m2000: stopIndexForAccessibility.countWithinRadiusMeters(accessUserLocation.lat, accessUserLocation.lng, 2000),
+    });
+  }, [showAccessibility, accessUserLocation, stopIndexForAccessibility]);
+
+
+  useEffect(() => {
+    if (!showLiveTransit) return;
     const uniqueRouteIds: string[] = [];
     const seen = new Set<string>();
     for (const v of vehicles) {
@@ -1328,7 +1739,13 @@ export default function TransportMap() {
         void prefetchRouteData(routeId, vehicle?.routeType, vehicle?.vehicleType);
       }
     });
-  }, [vehicles, prefetchRouteData]);
+  }, [vehicles, prefetchRouteData, showLiveTransit]);
+
+  const gibsDate = useMemo(() => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - 1);
+    return d.toISOString().slice(0, 10);
+  }, []);
 
   return (
     <div className="w-full h-screen relative overflow-hidden">
@@ -1346,12 +1763,31 @@ export default function TransportMap() {
           url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
           subdomains="abcd"
         />
+        {showWeatherClouds && (
+          <TileLayer
+            attribution='&copy; <a href="https://earthdata.nasa.gov/gibs">NASA GIBS</a>'
+            url={`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/${gibsDate}/GoogleMapsCompatible/{z}/{y}/{x}.jpg`}
+            opacity={0.55}
+            maxZoom={11}
+          />
+        )}
+        {showWeatherPrecip && (
+          <TileLayer
+            attribution='&copy; <a href="https://earthdata.nasa.gov/gibs">NASA GIBS</a>'
+            url={`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/IMERG_Precipitation_Rate/default/${gibsDate}/GoogleMapsCompatible/{z}/{y}/{x}.png`}
+            opacity={0.6}
+            maxZoom={11}
+          />
+        )}
         <MapUpdater mapRef={mapRef} />
-        <AccessibilityHeatmapLayer enabled={showAccessibility && !loadingRoute} stops={stops} />
+        <AccessibilityHeatmapLayer enabled={showAccessibility && !!accessUserLocation} stops={stops} userLocation={accessUserLocation} />
+        <AccessibilityUserLocationLayer enabled={showAccessibility} userLocation={accessUserLocation} />
         <PowerOutageLayer enabled={showPowerOutages} />
         <QldTrafficClosuresLayer enabled={showQldTrafficClosures} />
         <BccRoadOccupanciesLayer enabled={showBccRoadClosures} />
-        {displayedRoute &&
+        <HousingChoroplethLayer enabled={showHousingOverlay} metric={housingMetric} onLegend={setHousingLegend} />
+        {showLiveTransit &&
+          displayedRoute &&
           routeStopsRouteId === displayedRoute.routeId &&
           routeStops.length > 0 &&
           displayedRoute.coordinates &&
@@ -1385,7 +1821,7 @@ export default function TransportMap() {
               })}
             </>
           )}
-        {vehicles.map((vehicle) => {
+        {showLiveTransit && vehicles.map((vehicle) => {
           const vehicleType = vehicle.vehicleType || 
             (vehicle.routeType !== undefined 
               ? getVehicleTypeFromRouteType(vehicle.routeType)
@@ -1424,14 +1860,7 @@ export default function TransportMap() {
               className="ios-popup"
               eventHandlers={{
                 remove: () => {
-                  routeRequestIdRef.current += 1;
-                  restoreMapViewAfterRoute();
-                  setSelectedVehicleId(null);
-                  setDisplayedRoute(null);
-                  setRouteError(null);
-                  setRouteStops([]);
-                  setRouteStopsRouteId(null);
-                  setLoadingRoute(false);
+                  clearLiveTransitSelection();
                 },
               }}
             >
@@ -1497,7 +1926,7 @@ export default function TransportMap() {
         })}
       </MapContainer>
       
-      {loading && (
+      {showLiveTransit && loading && (
         <div className="absolute top-6 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur-xl px-6 py-3 rounded-2xl shadow-2xl z-[1000] border border-gray-200/50">
           <div className="flex items-center gap-3">
             <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
@@ -1506,7 +1935,7 @@ export default function TransportMap() {
         </div>
       )}
       
-      {error && (
+      {showLiveTransit && error && (
         <div className="absolute top-6 left-1/2 -translate-x-1/2 bg-red-50/95 backdrop-blur-xl px-6 py-3 rounded-2xl shadow-2xl z-[1000] border border-red-200/50 max-w-sm">
           <div className="flex items-start gap-3">
             <div className="text-red-500 text-xl">!</div>
@@ -1518,7 +1947,7 @@ export default function TransportMap() {
         </div>
       )}
 
-      {loadingRoute && (
+      {showLiveTransit && loadingRoute && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur-xl px-4 py-2 rounded-xl shadow-lg z-[1000] border border-gray-200/50">
           <div className="flex items-center gap-2">
             <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
@@ -1527,7 +1956,7 @@ export default function TransportMap() {
         </div>
       )}
 
-      {routeError && (
+      {showLiveTransit && routeError && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-yellow-50/95 backdrop-blur-xl px-4 py-2 rounded-xl shadow-lg z-[1000] border border-yellow-200/50 max-w-sm">
           <div className="flex items-start gap-2">
             <div className="text-yellow-600 text-sm">i</div>
@@ -1560,50 +1989,57 @@ export default function TransportMap() {
           style={{ bottom: showPowerOutages ? 170 : 24 }}
         >
           <div className="flex items-center justify-between mb-2">
-            <div className="text-xs font-semibold text-gray-800">Accessibility (nearest stop)</div>
+            <div className="text-xs font-semibold text-gray-800">Accessibility (your location)</div>
             <div className="text-[11px] text-gray-500">Stops: {stops.length}</div>
           </div>
-          <div
-            className="h-3 w-full rounded-full"
-            style={{
-              background:
-                'linear-gradient(90deg, rgba(40,200,60,0.9) 0%, rgba(255,220,60,0.9) 50%, rgba(220,40,40,0.9) 100%)',
-            }}
-          />
-          <div className="mt-2 flex justify-between text-[11px] text-gray-600">
-            <span>0 m</span>
-            <span>2.5 km</span>
-            <span>5 km+</span>
+          <div className="space-y-1 text-[11px] text-gray-700">
+            {accessLocating ? (
+              <div className="text-gray-600">Locating…</div>
+            ) : accessLocationError ? (
+              <div className="text-red-700">{accessLocationError}</div>
+            ) : accessUserLocation ? (
+              <>
+                <div className="text-gray-500">Overlay: nearest-stop distance within ~3 km of you</div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-gray-500">Nearest stop</span>
+                  <span className="font-semibold text-gray-800">
+                    {accessNearestStopMeters === null ? '—' : `${Math.round(accessNearestStopMeters)} m`}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-gray-500">Stops ≤ 500 m</span>
+                  <span className="font-semibold text-gray-800">{accessStopsWithin?.m500 ?? '—'}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-gray-500">Stops ≤ 1 km</span>
+                  <span className="font-semibold text-gray-800">{accessStopsWithin?.m1000 ?? '—'}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-gray-500">Stops ≤ 2 km</span>
+                  <span className="font-semibold text-gray-800">{accessStopsWithin?.m2000 ?? '—'}</span>
+                </div>
+              </>
+            ) : (
+              <div className="text-gray-600">Enable location permissions to compute accessibility.</div>
+            )}
           </div>
         </div>
       )}
 
-      {showRoadClosuresPanel && (
+      {(showQldTrafficClosures || showBccRoadClosures) && (
         <div
           className="absolute left-6 bg-white/90 backdrop-blur-xl px-4 py-3 rounded-2xl shadow-2xl z-[1000] border border-gray-200/50 w-[280px]"
           style={{ bottom: showPowerOutages ? 170 : 24 }}
         >
           <div className="flex items-center justify-between mb-2">
             <div className="text-xs font-semibold text-gray-800">Road closures</div>
-            <div className="text-[11px] text-gray-500">Overlays</div>
+            <div className="text-[11px] text-gray-500">
+              {(showQldTrafficClosures ? 1 : 0) + (showBccRoadClosures ? 1 : 0)} enabled
+            </div>
           </div>
           <div className="space-y-2 text-[11px] text-gray-700">
-            <label className="flex items-center justify-between gap-3">
-              <span>QLDTraffic (statewide)</span>
-              <input
-                type="checkbox"
-                checked={showQldTrafficClosures}
-                onChange={(e) => setShowQldTrafficClosures(e.target.checked)}
-              />
-            </label>
-            <label className="flex items-center justify-between gap-3">
-              <span>BCC planned occupancies (by suburb)</span>
-              <input
-                type="checkbox"
-                checked={showBccRoadClosures}
-                onChange={(e) => setShowBccRoadClosures(e.target.checked)}
-              />
-            </label>
+            {showQldTrafficClosures && <div>QLDTraffic: closures/roadworks/events (statewide)</div>}
+            {showBccRoadClosures && <div>BCC: planned road occupancies (aggregated by suburb)</div>}
           </div>
           <div className="mt-3 pt-2 border-t border-gray-200 space-y-2 text-[11px] text-gray-700">
             <div className="flex items-center gap-2">
@@ -1614,6 +2050,78 @@ export default function TransportMap() {
               <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: 'rgba(255,159,10,0.22)', border: '1px solid rgba(255,159,10,0.7)' }} />
               <span>Partial / lane restrictions</span>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showHousingOverlay && (
+        <div
+          className="absolute left-6 bg-white/90 backdrop-blur-xl px-4 py-3 rounded-2xl shadow-2xl z-[1000] border border-gray-200/50 w-[300px]"
+          style={{ bottom: showPowerOutages ? 170 : 24 }}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-xs font-semibold text-gray-800">Housing (ABS 2021)</div>
+            <div className="text-[11px] text-gray-500">{housingMetric === 'rent' ? 'Rent' : 'Mortgage'}</div>
+          </div>
+
+          <div className="space-y-2 text-[11px] text-gray-700">
+            <label className="flex items-center justify-between gap-3">
+              <span>Median weekly rent</span>
+              <input
+                type="radio"
+                name="housingMetric"
+                checked={housingMetric === 'rent'}
+                onChange={() => setHousingMetric('rent')}
+              />
+            </label>
+            <label className="flex items-center justify-between gap-3">
+              <span>Median monthly mortgage</span>
+              <input
+                type="radio"
+                name="housingMetric"
+                checked={housingMetric === 'mortgage'}
+                onChange={() => setHousingMetric('mortgage')}
+              />
+            </label>
+          </div>
+
+          <div className="mt-3 pt-2 border-t border-gray-200">
+            <div className="text-[11px] text-gray-600 mb-2">Legend</div>
+            {housingLegend?.breaks?.length ? (
+              <div className="space-y-1 text-[11px] text-gray-700">
+                {(() => {
+                  const fmt = (n: number) => `$${Math.round(n).toLocaleString('en-AU')}`;
+                  const bs = housingLegend.breaks;
+                  const cs = housingLegend.colors;
+                  const ranges: Array<{ color: string; label: string }> = [
+                    { color: cs[0], label: `≤ ${fmt(bs[0])}` },
+                    { color: cs[1], label: `≤ ${fmt(bs[1])}` },
+                    { color: cs[2], label: `≤ ${fmt(bs[2])}` },
+                    { color: cs[3], label: `≤ ${fmt(bs[3])}` },
+                    { color: cs[4], label: `≤ ${fmt(bs[4])}` },
+                    { color: cs[5], label: `> ${fmt(bs[4])}` },
+                  ];
+                  return ranges.map((r, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <div
+                        className="w-3 h-3 rounded-sm"
+                        style={{ backgroundColor: r.color, border: '1px solid rgba(17,24,39,0.25)' }}
+                      />
+                      <span>{r.label}</span>
+                    </div>
+                  ));
+                })()}
+                <div className="flex items-center gap-2 pt-1">
+                  <div
+                    className="w-3 h-3 rounded-sm"
+                    style={{ backgroundColor: '#E5E7EB', border: '1px solid rgba(17,24,39,0.15)' }}
+                  />
+                  <span>No data</span>
+                </div>
+              </div>
+            ) : (
+              <div className="text-[11px] text-gray-500">Loading…</div>
+            )}
           </div>
         </div>
       )}
@@ -1664,61 +2172,300 @@ export default function TransportMap() {
         </div>
       )}
       
-      <button
-        onClick={() => setShowInfo(!showInfo)}
-        className="absolute top-6 right-6 bg-white/90 backdrop-blur-xl px-4 py-3 rounded-2xl shadow-2xl z-[1000] border border-gray-200/50 hover:bg-white transition-colors"
-        aria-label="More information"
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          className="h-6 w-6 text-gray-700"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
+      <div ref={layersMenuRef} className="absolute top-6 right-20 z-[1000]">
+        <button
+          onClick={() => setShowLayersMenu((v) => !v)}
+          className="bg-white/90 backdrop-blur-xl px-4 py-3 rounded-2xl shadow-2xl border border-gray-200/50 hover:bg-white transition-colors flex items-center gap-2"
+          aria-label="Layers"
+          aria-expanded={showLayersMenu}
         >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-          />
-        </svg>
-      </button>
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 3l9 5-9 5-9-5 9-5z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l9 5 9-5" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 17l9 5 9-5" />
+          </svg>
+          <span className="text-sm font-semibold text-gray-800">Layers</span>
+        </button>
 
-      <button
-        onClick={() => setShowRoadClosuresPanel((v) => !v)}
-        className="absolute top-6 right-52 bg-white/90 backdrop-blur-xl px-4 py-3 rounded-2xl shadow-2xl z-[1000] border border-gray-200/50 hover:bg-white transition-colors"
-        aria-label="Toggle road closures overlays"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 24 24" fill={showRoadClosuresPanel ? '#FF3B30' : 'none'} stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M4 20h16M6 20V9a2 2 0 012-2h8a2 2 0 012 2v11M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2" />
-        </svg>
-      </button>
+        {showLayersMenu && (
+          <div className="mt-3 w-[320px] bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-gray-200/50 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-200/60 flex items-center justify-between">
+              <div className="text-sm font-semibold text-gray-800">Map layers</div>
+              <button
+                onClick={() => setShowLayersMenu(false)}
+                className="text-gray-500 hover:text-gray-700 transition-colors"
+                aria-label="Close layers menu"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
 
-      <button
-        onClick={() => setShowAccessibility((v) => !v)}
-        className="absolute top-6 right-20 bg-white/90 backdrop-blur-xl px-4 py-3 rounded-2xl shadow-2xl z-[1000] border border-gray-200/50 hover:bg-white transition-colors"
-        aria-label="Toggle accessibility heatmap"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 24 24" fill={showAccessibility ? '#007AFF' : 'none'} stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h4l2-6 4 12 2-6h4" />
-        </svg>
-      </button>
+            <div className="px-4 py-3 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <label htmlFor="toggle-live-transit" className="min-w-0 cursor-pointer">
+                  <div className="text-sm font-semibold text-gray-800">Live transit</div>
+                  <div className="text-[12px] text-gray-500">
+                    TransLink GTFS-RT live vehicles (SEQ) + click a vehicle for route shape & stops (updates ~5s)
+                  </div>
+                </label>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setShowInfo(true);
+                    }}
+                    className="text-gray-500 hover:text-gray-700 transition-colors"
+                    aria-label="Live transit information"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </button>
+                  <input
+                    id="toggle-live-transit"
+                    type="checkbox"
+                    checked={showLiveTransit}
+                    onChange={(e) => {
+                      const next = e.target.checked;
+                      if (!next) clearLiveTransitSelection();
+                      setShowLiveTransit(next);
+                    }}
+                    aria-label="Toggle live public transport"
+                  />
+                </div>
+              </div>
 
-      <button
-        onClick={() => setShowPowerOutages((v) => !v)}
-        className="absolute top-6 right-36 bg-white/90 backdrop-blur-xl px-4 py-3 rounded-2xl shadow-2xl z-[1000] border border-gray-200/50 hover:bg-white transition-colors"
-        aria-label="Toggle power outages"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 24 24" fill={showPowerOutages ? '#F59E0B' : 'none'} stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M13 2L3 14h7l-1 8 12-14h-7l-1-6z" />
-        </svg>
-      </button>
+              <label className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-gray-800">Accessibility</div>
+                  <div className="text-[12px] text-gray-500">Schedule-based travel time heatmap (GTFS) — not live</div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={showAccessibility}
+                  onChange={(e) => setShowAccessibility(e.target.checked)}
+                  aria-label="Toggle accessibility heatmap"
+                />
+              </label>
+
+              <label className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-gray-800">Power outages</div>
+                  <div className="text-[12px] text-gray-500">Energex outage areas (planned + unplanned, refresh ~5 min)</div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={showPowerOutages}
+                  onChange={(e) => setShowPowerOutages(e.target.checked)}
+                  aria-label="Toggle power outages"
+                />
+              </label>
+
+              <div className="pt-2 border-t border-gray-200/60">
+                <div className="text-sm font-semibold text-gray-800 mb-2">Weather</div>
+                <div className="space-y-2">
+                  <label className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-[12px] font-semibold text-gray-800">Clouds</div>
+                      <div className="text-[11px] text-gray-500">Satellite tiles (low zoom)</div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={showWeatherClouds}
+                      onChange={(e) => setShowWeatherClouds(e.target.checked)}
+                      aria-label="Toggle weather clouds"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-[12px] font-semibold text-gray-800">Precip</div>
+                      <div className="text-[11px] text-gray-500">Precip tiles + local gauges</div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={showWeatherPrecip}
+                      onChange={(e) => setShowWeatherPrecip(e.target.checked)}
+                      aria-label="Toggle weather precipitation"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-[12px] font-semibold text-gray-800">Wind</div>
+                      <div className="text-[11px] text-gray-500">Vectors (high zoom)</div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={showWeatherWind}
+                      onChange={(e) => setShowWeatherWind(e.target.checked)}
+                      aria-label="Toggle weather wind"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-[12px] font-semibold text-gray-800">Temperature</div>
+                      <div className="text-[11px] text-gray-500">Isotherms (high zoom)</div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={showWeatherTemp}
+                      onChange={(e) => setShowWeatherTemp(e.target.checked)}
+                      aria-label="Toggle weather temperature"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-gray-200/60">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-gray-800">Housing</div>
+                    <div className="text-[12px] text-gray-500">ABS Census 2021 (median rent + mortgage)</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setExpandHousing((v) => !v)}
+                    className="text-[12px] font-semibold text-gray-700 hover:text-gray-900 transition-colors"
+                    aria-label="Toggle housing options"
+                    aria-expanded={expandHousing}
+                  >
+                    {expandHousing ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+
+                {expandHousing && (
+                  <div className="mt-3 space-y-3 text-[12px] text-gray-700">
+                    <label className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-[12px] font-semibold text-gray-800">Enable overlay</div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={showHousingOverlay}
+                        onChange={(e) => setShowHousingOverlay(e.target.checked)}
+                        aria-label="Toggle housing overlay"
+                      />
+                    </label>
+
+                    <div className="space-y-2">
+                      <label className="flex items-center justify-between gap-3">
+                        <span>Median weekly rent</span>
+                        <input
+                          type="radio"
+                          name="housingMetric"
+                          checked={housingMetric === 'rent'}
+                          onChange={() => setHousingMetric('rent')}
+                          aria-label="Housing metric rent"
+                        />
+                      </label>
+                      <label className="flex items-center justify-between gap-3">
+                        <span>Median monthly mortgage</span>
+                        <input
+                          type="radio"
+                          name="housingMetric"
+                          checked={housingMetric === 'mortgage'}
+                          onChange={() => setHousingMetric('mortgage')}
+                          aria-label="Housing metric mortgage"
+                        />
+                      </label>
+                    </div>
+
+                    {showHousingOverlay && housingLegend?.breaks?.length ? (
+                      <div className="pt-2 border-t border-gray-200/60 space-y-1">
+                        <div className="text-[12px] font-semibold text-gray-800">Legend</div>
+                        {(() => {
+                          const fmt = (n: number) => `$${Math.round(n).toLocaleString('en-AU')}`;
+                          const bs = housingLegend.breaks;
+                          const cs = housingLegend.colors;
+                          const ranges: Array<{ color: string; label: string }> = [
+                            { color: cs[0], label: `≤ ${fmt(bs[0])}` },
+                            { color: cs[1], label: `≤ ${fmt(bs[1])}` },
+                            { color: cs[2], label: `≤ ${fmt(bs[2])}` },
+                            { color: cs[3], label: `≤ ${fmt(bs[3])}` },
+                            { color: cs[4], label: `≤ ${fmt(bs[4])}` },
+                            { color: cs[5], label: `> ${fmt(bs[4])}` },
+                          ];
+                          return (
+                            <div className="space-y-1 text-[12px] text-gray-700">
+                              {ranges.map((r, i) => (
+                                <div key={i} className="flex items-center gap-2">
+                                  <div
+                                    className="w-3 h-3 rounded-sm"
+                                    style={{ backgroundColor: r.color, border: '1px solid rgba(17,24,39,0.25)' }}
+                                  />
+                                  <span>{r.label}</span>
+                                </div>
+                              ))}
+                              <div className="flex items-center gap-2 pt-1">
+                                <div
+                                  className="w-3 h-3 rounded-sm"
+                                  style={{ backgroundColor: '#E5E7EB', border: '1px solid rgba(17,24,39,0.15)' }}
+                                />
+                                <span>No data</span>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    ) : showHousingOverlay ? (
+                      <div className="pt-2 border-t border-gray-200/60 text-[12px] text-gray-500">Legend loading…</div>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-2 border-t border-gray-200/60">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-gray-800">Road closures</div>
+                    <div className="text-[12px] text-gray-500">QLDTraffic events + BCC planned road occupancies (refresh ~60s)</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setExpandRoadClosures((v) => !v)}
+                    className="text-[12px] font-semibold text-gray-700 hover:text-gray-900 transition-colors"
+                    aria-label="Toggle road closures options"
+                    aria-expanded={expandRoadClosures}
+                  >
+                    {expandRoadClosures ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+
+                {expandRoadClosures && (
+                  <div className="mt-3 space-y-2 text-[12px] text-gray-700">
+                    <label className="flex items-center justify-between gap-3">
+                      <span>QLDTraffic (closures/roadworks/events)</span>
+                      <input
+                        type="checkbox"
+                        checked={showQldTrafficClosures}
+                        onChange={(e) => setShowQldTrafficClosures(e.target.checked)}
+                        aria-label="Toggle QLDTraffic closures"
+                      />
+                    </label>
+                    <label className="flex items-center justify-between gap-3">
+                      <span>BCC planned occupancies (by suburb)</span>
+                      <input
+                        type="checkbox"
+                        checked={showBccRoadClosures}
+                        onChange={(e) => setShowBccRoadClosures(e.target.checked)}
+                        aria-label="Toggle BCC planned occupancies"
+                      />
+                    </label>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
       {showInfo && (
-        <div className="absolute top-20 right-6 bg-white/95 backdrop-blur-xl px-6 py-5 rounded-2xl shadow-2xl z-[1000] border border-gray-200/50 max-w-sm">
+        <div className="absolute top-20 right-20 bg-white/95 backdrop-blur-xl px-6 py-5 rounded-2xl shadow-2xl z-[1000] border border-gray-200/50 max-w-sm">
           <div className="flex items-start justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-800">About This Map</h3>
+            <h3 className="text-lg font-semibold text-gray-800">Live transit info</h3>
             <button
               onClick={() => setShowInfo(false)}
               className="text-gray-500 hover:text-gray-700 transition-colors"
@@ -1742,9 +2489,9 @@ export default function TransportMap() {
           </div>
           <div className="space-y-3 text-sm text-gray-700">
             <div>
-              <p className="font-semibold mb-1">Real-time Transit Map</p>
+              <p className="font-semibold mb-1">TransLink GTFS-RT (SEQ)</p>
               <p className="text-gray-600">
-                This map shows live vehicle positions for buses, trains, and ferries in the SEQ region.
+                Shows live vehicle positions for buses, trains, and ferries in the SEQ region from TransLink&apos;s GTFS-realtime feed.
               </p>
             </div>
             <div>
@@ -1767,7 +2514,7 @@ export default function TransportMap() {
             <div>
               <p className="font-semibold mb-1">Updates</p>
               <p className="text-gray-600">
-                Data refreshes every 3 seconds automatically. Click on any vehicle marker to see more details.
+                Positions refresh about every 5 seconds. Click a vehicle marker to load its route shape and stops.
               </p>
             </div>
             <div className="pt-2 border-t border-gray-200">

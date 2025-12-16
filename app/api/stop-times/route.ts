@@ -8,6 +8,8 @@ interface StopTime {
   trip_id: string;
   stop_id: string;
   stop_sequence: number;
+  arrival_time: number;
+  departure_time: number;
 }
 
 let stopTimesCache: Map<string, StopTime[]> | null = null;
@@ -57,21 +59,47 @@ async function fetchStopTimes(): Promise<Map<string, StopTime[]>> {
           const tripIdIndex = headers.indexOf('trip_id');
           const stopIdIndex = headers.indexOf('stop_id');
           const stopSequenceIndex = headers.indexOf('stop_sequence');
+          const arrivalTimeIndex = headers.indexOf('arrival_time');
+          const departureTimeIndex = headers.indexOf('departure_time');
 
-          if (tripIdIndex !== -1 && stopIdIndex !== -1 && stopSequenceIndex !== -1) {
+          const parseGtfsTimeToSeconds = (t: string): number | null => {
+            const s = t.replace(/^"|"$/g, '').trim();
+            if (!s) return null;
+            const m = /^(\d+):(\d{2}):(\d{2})$/.exec(s);
+            if (!m) return null;
+            const hh = Number(m[1]);
+            const mm = Number(m[2]);
+            const ss = Number(m[3]);
+            if (!Number.isFinite(hh) || !Number.isFinite(mm) || !Number.isFinite(ss)) return null;
+            if (mm < 0 || mm >= 60 || ss < 0 || ss >= 60 || hh < 0) return null;
+            return hh * 3600 + mm * 60 + ss;
+          };
+
+          if (
+            tripIdIndex !== -1 &&
+            stopIdIndex !== -1 &&
+            stopSequenceIndex !== -1 &&
+            arrivalTimeIndex !== -1 &&
+            departureTimeIndex !== -1
+          ) {
             for (let i = 1; i < lines.length; i++) {
               const line = lines[i].trim();
               if (!line) continue;
               
               const values = parseCSVLine(line);
-              if (values.length > Math.max(tripIdIndex, stopIdIndex, stopSequenceIndex)) {
+              if (
+                values.length >
+                Math.max(tripIdIndex, stopIdIndex, stopSequenceIndex, arrivalTimeIndex, departureTimeIndex)
+              ) {
                 const tripId = values[tripIdIndex].replace(/^"|"$/g, '');
                 const stopId = values[stopIdIndex].replace(/^"|"$/g, '');
                 const stopSequenceStr = values[stopSequenceIndex].replace(/^"|"$/g, '');
                 
                 const stopSequence = parseInt(stopSequenceStr, 10);
+                const arrivalTime = parseGtfsTimeToSeconds(values[arrivalTimeIndex]);
+                const departureTime = parseGtfsTimeToSeconds(values[departureTimeIndex]);
                 
-                if (tripId && stopId && !isNaN(stopSequence)) {
+                if (tripId && stopId && !isNaN(stopSequence) && arrivalTime !== null && departureTime !== null) {
                   if (!stopTimesMap.has(tripId)) {
                     stopTimesMap.set(tripId, []);
                   }
@@ -79,6 +107,8 @@ async function fetchStopTimes(): Promise<Map<string, StopTime[]>> {
                     trip_id: tripId,
                     stop_id: stopId,
                     stop_sequence: stopSequence,
+                    arrival_time: arrivalTime,
+                    departure_time: departureTime,
                   });
                 }
               }

@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "build:housing": "tsc -p scripts/tsconfig.json && node scripts/dist/buildHousingMedians.js",
+    "build:housing-density": "tsc -p scripts/tsconfig.json && node scripts/dist/buildHousingDensityOverlay.js",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"

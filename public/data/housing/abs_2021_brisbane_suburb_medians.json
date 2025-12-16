@@ -1,0 +1,977 @@
+{
+  "ACACIA RIDGE": {
+    "suburb_name": "ACACIA RIDGE",
+    "median_weekly_rent": 335,
+    "median_monthly_mortgage": 1517
+  },
+  "ALBION": {
+    "suburb_name": "ALBION",
+    "median_weekly_rent": 410,
+    "median_monthly_mortgage": 1950
+  },
+  "ALDERLEY": {
+    "suburb_name": "ALDERLEY",
+    "median_weekly_rent": 390,
+    "median_monthly_mortgage": 2200
+  },
+  "ALGESTER": {
+    "suburb_name": "ALGESTER",
+    "median_weekly_rent": 395,
+    "median_monthly_mortgage": 1750
+  },
+  "ANNERLEY": {
+    "suburb_name": "ANNERLEY",
+    "median_weekly_rent": 360,
+    "median_monthly_mortgage": 2000
+  },
+  "ANSTEAD": {
+    "suburb_name": "ANSTEAD",
+    "median_weekly_rent": 490,
+    "median_monthly_mortgage": 2383
+  },
+  "ARCHERFIELD": {
+    "suburb_name": "ARCHERFIELD",
+    "median_weekly_rent": 343,
+    "median_monthly_mortgage": 1517
+  },
+  "ASCOT": {
+    "suburb_name": "ASCOT",
+    "median_weekly_rent": 390,
+    "median_monthly_mortgage": 2400
+  },
+  "ASHGROVE": {
+    "suburb_name": "ASHGROVE",
+    "median_weekly_rent": 440,
+    "median_monthly_mortgage": 2600
+  },
+  "ASPLEY": {
+    "suburb_name": "ASPLEY",
+    "median_weekly_rent": 415,
+    "median_monthly_mortgage": 2000
+  },
+  "AUCHENFLOWER": {
+    "suburb_name": "AUCHENFLOWER",
+    "median_weekly_rent": 390,
+    "median_monthly_mortgage": 2167
+  },
+  "BALD HILLS": {
+    "suburb_name": "BALD HILLS",
+    "median_weekly_rent": 388,
+    "median_monthly_mortgage": 1733
+  },
+  "BALMORAL": {
+    "suburb_name": "BALMORAL",
+    "median_weekly_rent": 450,
+    "median_monthly_mortgage": 2729
+  },
+  "BANKS CREEK": {
+    "suburb_name": "BANKS CREEK",
+    "median_weekly_rent": 0,
+    "median_monthly_mortgage": 1679
+  },
+  "BANYO": {
+    "suburb_name": "BANYO",
+    "median_weekly_rent": 410,
+    "median_monthly_mortgage": 2000
+  },
+  "BARDON": {
+    "suburb_name": "BARDON",
+    "median_weekly_rent": 500,
+    "median_monthly_mortgage": 2817
+  },
+  "BELLBOWRIE": {
+    "suburb_name": "BELLBOWRIE",
+    "median_weekly_rent": 440,
+    "median_monthly_mortgage": 1950
+  },
+  "BELMONT": {
+    "suburb_name": "BELMONT",
+    "median_weekly_rent": 460,
+    "median_monthly_mortgage": 2167
+  },
+  "BOONDALL": {
+    "suburb_name": "BOONDALL",
+    "median_weekly_rent": 415,
+    "median_monthly_mortgage": 1800
+  },
+  "BOWEN HILLS": {
+    "suburb_name": "BOWEN HILLS",
+    "median_weekly_rent": 390,
+    "median_monthly_mortgage": 1614
+  },
+  "BRACKEN RIDGE": {
+    "suburb_name": "BRACKEN RIDGE",
+    "median_weekly_rent": 410,
+    "median_monthly_mortgage": 1800
+  },
+  "BRIDGEMAN DOWNS": {
+    "suburb_name": "BRIDGEMAN DOWNS",
+    "median_weekly_rent": 520,
+    "median_monthly_mortgage": 2500
+  },
+  "BRIGHTON": {
+    "suburb_name": "BRIGHTON",
+    "median_weekly_rent": 400,
+    "median_monthly_mortgage": 1993
+  },
+  "BRISBANE AIRPORT": {
+    "suburb_name": "BRISBANE AIRPORT",
+    "median_weekly_rent": 0,
+    "median_monthly_mortgage": 0
+  },
+  "BRISBANE CITY": {
+    "suburb_name": "BRISBANE CITY",
+    "median_weekly_rent": 460,
+    "median_monthly_mortgage": 1942
+  },
+  "BROOKFIELD": {
+    "suburb_name": "BROOKFIELD",
+    "median_weekly_rent": 400,
+    "median_monthly_mortgage": 2798
+  },
+  "BULIMBA": {
+    "suburb_name": "BULIMBA",
+    "median_weekly_rent": 500,
+    "median_monthly_mortgage": 2800
+  },
+  "BULWER": {
+    "suburb_name": "BULWER",
+    "median_weekly_rent": 225,
+    "median_monthly_mortgage": 0
+  },
+  "BURBANK": {
+    "suburb_name": "BURBANK",
+    "median_weekly_rent": 365,
+    "median_monthly_mortgage": 3102
+  },
+  "CALAMVALE": {
+    "suburb_name": "CALAMVALE",
+    "median_weekly_rent": 410,
+    "median_monthly_mortgage": 1733
+  },
+  "CAMP HILL": {
+    "suburb_name": "CAMP HILL",
+    "median_weekly_rent": 460,
+    "median_monthly_mortgage": 2600
+  },
+  "CANNON HILL": {
+    "suburb_name": "CANNON HILL",
+    "median_weekly_rent": 450,
+    "median_monthly_mortgage": 2396
+  },
+  "CARINA": {
+    "suburb_name": "CARINA",
+    "median_weekly_rent": 440,
+    "median_monthly_mortgage": 2000
+  },
+  "CARINA HEIGHTS": {
+    "suburb_name": "CARINA HEIGHTS",
+    "median_weekly_rent": 403,
+    "median_monthly_mortgage": 1950
+  },
+  "CARINDALE": {
+    "suburb_name": "CARINDALE",
+    "median_weekly_rent": 530,
+    "median_monthly_mortgage": 2400
+  },
+  "CARSELDINE": {
+    "suburb_name": "CARSELDINE",
+    "median_weekly_rent": 435,
+    "median_monthly_mortgage": 2000
+  },
+  "CHANDLER": {
+    "suburb_name": "CHANDLER",
+    "median_weekly_rent": 368,
+    "median_monthly_mortgage": 3467
+  },
+  "CHAPEL HILL": {
+    "suburb_name": "CHAPEL HILL",
+    "median_weekly_rent": 555,
+    "median_monthly_mortgage": 2427
+  },
+  "CHELMER": {
+    "suburb_name": "CHELMER",
+    "median_weekly_rent": 490,
+    "median_monthly_mortgage": 3000
+  },
+  "CHERMSIDE": {
+    "suburb_name": "CHERMSIDE",
+    "median_weekly_rent": 370,
+    "median_monthly_mortgage": 1690
+  },
+  "CHERMSIDE WEST": {
+    "suburb_name": "CHERMSIDE WEST",
+    "median_weekly_rent": 455,
+    "median_monthly_mortgage": 2058
+  },
+  "CHUWAR": {
+    "suburb_name": "CHUWAR",
+    "median_weekly_rent": 350,
+    "median_monthly_mortgage": 1863
+  },
+  "CLAYFIELD": {
+    "suburb_name": "CLAYFIELD",
+    "median_weekly_rent": 350,
+    "median_monthly_mortgage": 2000
+  },
+  "COOPERS PLAINS": {
+    "suburb_name": "COOPERS PLAINS",
+    "median_weekly_rent": 369,
+    "median_monthly_mortgage": 1755
+  },
+  "COORPAROO": {
+    "suburb_name": "COORPAROO",
+    "median_weekly_rent": 380,
+    "median_monthly_mortgage": 2047
+  },
+  "CORINDA": {
+    "suburb_name": "CORINDA",
+    "median_weekly_rent": 388,
+    "median_monthly_mortgage": 2200
+  },
+  "COWAN COWAN": {
+    "suburb_name": "COWAN COWAN",
+    "median_weekly_rent": 208,
+    "median_monthly_mortgage": 900
+  },
+  "DARRA": {
+    "suburb_name": "DARRA",
+    "median_weekly_rent": 350,
+    "median_monthly_mortgage": 1500
+  },
+  "DEAGON": {
+    "suburb_name": "DEAGON",
+    "median_weekly_rent": 350,
+    "median_monthly_mortgage": 1846
+  },
+  "DOOLANDELLA": {
+    "suburb_name": "DOOLANDELLA",
+    "median_weekly_rent": 360,
+    "median_monthly_mortgage": 1733
+  },
+  "DREWVALE": {
+    "suburb_name": "DREWVALE",
+    "median_weekly_rent": 460,
+    "median_monthly_mortgage": 1993
+  },
+  "DURACK": {
+    "suburb_name": "DURACK",
+    "median_weekly_rent": 350,
+    "median_monthly_mortgage": 1517
+  },
+  "DUTTON PARK": {
+    "suburb_name": "DUTTON PARK",
+    "median_weekly_rent": 390,
+    "median_monthly_mortgage": 2368
+  },
+  "EAGLE FARM": {
+    "suburb_name": "EAGLE FARM",
+    "median_weekly_rent": 450,
+    "median_monthly_mortgage": 0
+  },
+  "EAST BRISBANE": {
+    "suburb_name": "EAST BRISBANE",
+    "median_weekly_rent": 400,
+    "median_monthly_mortgage": 2167
+  },
+  "EIGHT MILE PLAINS": {
+    "suburb_name": "EIGHT MILE PLAINS",
+    "median_weekly_rent": 420,
+    "median_monthly_mortgage": 1803
+  },
+  "ELLEN GROVE": {
+    "suburb_name": "ELLEN GROVE",
+    "median_weekly_rent": 350,
+    "median_monthly_mortgage": 1491
+  },
+  "ENGLAND CREEK": {
+    "suburb_name": "ENGLAND CREEK",
+    "median_weekly_rent": 0,
+    "median_monthly_mortgage": 1275
+  },
+  "ENOGGERA": {
+    "suburb_name": "ENOGGERA",
+    "median_weekly_rent": 368,
+    "median_monthly_mortgage": 2156
+  },
+  "ENOGGERA RESERVOIR": {
+    "suburb_name": "ENOGGERA RESERVOIR",
+    "median_weekly_rent": 450,
+    "median_monthly_mortgage": 1270
+  },
+  "EVERTON PARK": {
+    "suburb_name": "EVERTON PARK",
+    "median_weekly_rent": 420,
+    "median_monthly_mortgage": 1950
+  },
+  "FAIRFIELD": {
+    "suburb_name": "FAIRFIELD",
+    "median_weekly_rent": 410,
+    "median_monthly_mortgage": 2100
+  },
+  "FERNY GROVE": {
+    "suburb_name": "FERNY GROVE",
+    "median_weekly_rent": 400,
+    "median_monthly_mortgage": 2000
+  },
+  "FIG TREE POCKET": {
+    "suburb_name": "FIG TREE POCKET",
+    "median_weekly_rent": 590,
+    "median_monthly_mortgage": 3033
+  },
+  "FITZGIBBON": {
+    "suburb_name": "FITZGIBBON",
+    "median_weekly_rent": 385,
+    "median_monthly_mortgage": 1677
+  },
+  "FOREST LAKE": {
+    "suburb_name": "FOREST LAKE",
+    "median_weekly_rent": 390,
+    "median_monthly_mortgage": 1690
+  },
+  "FORTITUDE VALLEY": {
+    "suburb_name": "FORTITUDE VALLEY",
+    "median_weekly_rent": 400,
+    "median_monthly_mortgage": 1718
+  },
+  "GAYTHORNE": {
+    "suburb_name": "GAYTHORNE",
+    "median_weekly_rent": 350,
+    "median_monthly_mortgage": 1842
+  },
+  "GEEBUNG": {
+    "suburb_name": "GEEBUNG",
+    "median_weekly_rent": 415,
+    "median_monthly_mortgage": 2000
+  },
+  "GORDON PARK": {
+    "suburb_name": "GORDON PARK",
+    "median_weekly_rent": 365,
+    "median_monthly_mortgage": 2204
+  },
+  "GRACEVILLE": {
+    "suburb_name": "GRACEVILLE",
+    "median_weekly_rent": 495,
+    "median_monthly_mortgage": 2600
+  },
+  "GRANGE": {
+    "suburb_name": "GRANGE",
+    "median_weekly_rent": 460,
+    "median_monthly_mortgage": 2600
+  },
+  "GREENSLOPES": {
+    "suburb_name": "GREENSLOPES",
+    "median_weekly_rent": 370,
+    "median_monthly_mortgage": 1974
+  },
+  "GUMDALE": {
+    "suburb_name": "GUMDALE",
+    "median_weekly_rent": 585,
+    "median_monthly_mortgage": 2669
+  },
+  "HAMILTON": {
+    "suburb_name": "HAMILTON",
+    "median_weekly_rent": 430,
+    "median_monthly_mortgage": 2167
+  },
+  "HAWTHORNE": {
+    "suburb_name": "HAWTHORNE",
+    "median_weekly_rent": 430,
+    "median_monthly_mortgage": 2809
+  },
+  "HEATHWOOD": {
+    "suburb_name": "HEATHWOOD",
+    "median_weekly_rent": 455,
+    "median_monthly_mortgage": 2167
+  },
+  "HEMMANT": {
+    "suburb_name": "HEMMANT",
+    "median_weekly_rent": 430,
+    "median_monthly_mortgage": 2000
+  },
+  "HENDRA": {
+    "suburb_name": "HENDRA",
+    "median_weekly_rent": 550,
+    "median_monthly_mortgage": 2855
+  },
+  "HERSTON": {
+    "suburb_name": "HERSTON",
+    "median_weekly_rent": 400,
+    "median_monthly_mortgage": 2300
+  },
+  "HIGHGATE HILL": {
+    "suburb_name": "HIGHGATE HILL",
+    "median_weekly_rent": 380,
+    "median_monthly_mortgage": 2376
+  },
+  "HOLLAND PARK": {
+    "suburb_name": "HOLLAND PARK",
+    "median_weekly_rent": 390,
+    "median_monthly_mortgage": 2300
+  },
+  "HOLLAND PARK WEST": {
+    "suburb_name": "HOLLAND PARK WEST",
+    "median_weekly_rent": 390,
+    "median_monthly_mortgage": 2167
+  },
+  "INALA": {
+    "suburb_name": "INALA",
+    "median_weekly_rent": 250,
+    "median_monthly_mortgage": 1300
+  },
+  "INDOOROOPILLY": {
+    "suburb_name": "INDOOROOPILLY",
+    "median_weekly_rent": 440,
+    "median_monthly_mortgage": 2058
+  },
+  "JAMBOREE HEIGHTS": {
+    "suburb_name": "JAMBOREE HEIGHTS",
+    "median_weekly_rent": 420,
+    "median_monthly_mortgage": 1816
+  },
+  "JINDALEE": {
+    "suburb_name": "JINDALEE",
+    "median_weekly_rent": 470,
+    "median_monthly_mortgage": 2092
+  },
+  "KALINGA": {
+    "suburb_name": "KALINGA",
+    "median_weekly_rent": 400,
+    "median_monthly_mortgage": 3033
+  },
+  "KANGAROO POINT": {
+    "suburb_name": "KANGAROO POINT",
+    "median_weekly_rent": 450,
+    "median_monthly_mortgage": 1950
+  },
+  "KARANA DOWNS": {
+    "suburb_name": "KARANA DOWNS",
+    "median_weekly_rent": 400,
+    "median_monthly_mortgage": 1800
+  },
+  "KARAWATHA": {
+    "suburb_name": "KARAWATHA",
+    "median_weekly_rent": 585,
+    "median_monthly_mortgage": 2600
+  },
+  "KEDRON": {
+    "suburb_name": "KEDRON",
+    "median_weekly_rent": 380,
+    "median_monthly_mortgage": 2200
+  },
+  "KELVIN GROVE": {
+    "suburb_name": "KELVIN GROVE",
+    "median_weekly_rent": 400,
+    "median_monthly_mortgage": 2000
+  },
+  "KENMORE": {
+    "suburb_name": "KENMORE",
+    "median_weekly_rent": 513,
+    "median_monthly_mortgage": 2200
+  },
+  "KENMORE HILLS": {
+    "suburb_name": "KENMORE HILLS",
+    "median_weekly_rent": 598,
+    "median_monthly_mortgage": 2694
+  },
+  "KEPERRA": {
+    "suburb_name": "KEPERRA",
+    "median_weekly_rent": 400,
+    "median_monthly_mortgage": 1950
+  },
+  "KHOLO": {
+    "suburb_name": "KHOLO",
+    "median_weekly_rent": 323,
+    "median_monthly_mortgage": 2000
+  },
+  "KOORINGAL": {
+    "suburb_name": "KOORINGAL",
+    "median_weekly_rent": 0,
+    "median_monthly_mortgage": 1920
+  },
+  "KURABY": {
+    "suburb_name": "KURABY",
+    "median_weekly_rent": 400,
+    "median_monthly_mortgage": 2100
+  },
+  "LAKE MANCHESTER": {
+    "suburb_name": "LAKE MANCHESTER",
+    "median_weekly_rent": 0,
+    "median_monthly_mortgage": 1050
+  },
+  "LARAPINTA": {
+    "suburb_name": "LARAPINTA",
+    "median_weekly_rent": null,
+    "median_monthly_mortgage": null
+  },
+  "LOTA": {
+    "suburb_name": "LOTA",
+    "median_weekly_rent": 415,
+    "median_monthly_mortgage": 2167
+  },
+  "LUTWYCHE": {
+    "suburb_name": "LUTWYCHE",
+    "median_weekly_rent": 395,
+    "median_monthly_mortgage": 1820
+  },
+  "LYTTON": {
+    "suburb_name": "LYTTON",
+    "median_weekly_rent": null,
+    "median_monthly_mortgage": null
+  },
+  "MACGREGOR": {
+    "suburb_name": "MACGREGOR",
+    "median_weekly_rent": 430,
+    "median_monthly_mortgage": 1950
+  },
+  "MACKENZIE": {
+    "suburb_name": "MACKENZIE",
+    "median_weekly_rent": 500,
+    "median_monthly_mortgage": 2192
+  },
+  "MANLY": {
+    "suburb_name": "MANLY",
+    "median_weekly_rent": 403,
+    "median_monthly_mortgage": 2200
+  },
+  "MANLY WEST": {
+    "suburb_name": "MANLY WEST",
+    "median_weekly_rent": 430,
+    "median_monthly_mortgage": 2053
+  },
+  "MANSFIELD": {
+    "suburb_name": "MANSFIELD",
+    "median_weekly_rent": 430,
+    "median_monthly_mortgage": 2126
+  },
+  "MCDOWALL": {
+    "suburb_name": "MCDOWALL",
+    "median_weekly_rent": 470,
+    "median_monthly_mortgage": 2167
+  },
+  "MIDDLE PARK": {
+    "suburb_name": "MIDDLE PARK",
+    "median_weekly_rent": 450,
+    "median_monthly_mortgage": 1950
+  },
+  "MILTON": {
+    "suburb_name": "MILTON",
+    "median_weekly_rent": 435,
+    "median_monthly_mortgage": 1950
+  },
+  "MITCHELTON": {
+    "suburb_name": "MITCHELTON",
+    "median_weekly_rent": 400,
+    "median_monthly_mortgage": 2167
+  },
+  "MOGGILL": {
+    "suburb_name": "MOGGILL",
+    "median_weekly_rent": 460,
+    "median_monthly_mortgage": 2167
+  },
+  "MOOROOKA": {
+    "suburb_name": "MOOROOKA",
+    "median_weekly_rent": 360,
+    "median_monthly_mortgage": 2000
+  },
+  "MORETON BAY": {
+    "suburb_name": "MORETON BAY",
+    "median_weekly_rent": null,
+    "median_monthly_mortgage": null
+  },
+  "MORETON ISLAND": {
+    "suburb_name": "MORETON ISLAND",
+    "median_weekly_rent": 210,
+    "median_monthly_mortgage": 4333
+  },
+  "MORNINGSIDE": {
+    "suburb_name": "MORNINGSIDE",
+    "median_weekly_rent": 430,
+    "median_monthly_mortgage": 2132
+  },
+  "MOUNT COOTTHA": {
+    "suburb_name": "MOUNT COOT-THA",
+    "median_weekly_rent": null,
+    "median_monthly_mortgage": null
+  },
+  "MOUNT CROSBY": {
+    "suburb_name": "MOUNT CROSBY",
+    "median_weekly_rent": 400,
+    "median_monthly_mortgage": 1800
+  },
+  "MOUNT GRAVATT": {
+    "suburb_name": "MOUNT GRAVATT",
+    "median_weekly_rent": 380,
+    "median_monthly_mortgage": 2001
+  },
+  "MOUNT GRAVATT EAST": {
+    "suburb_name": "MOUNT GRAVATT EAST",
+    "median_weekly_rent": 400,
+    "median_monthly_mortgage": 2041
+  },
+  "MOUNT OMMANEY": {
+    "suburb_name": "MOUNT OMMANEY",
+    "median_weekly_rent": 540,
+    "median_monthly_mortgage": 2316
+  },
+  "MURARRIE": {
+    "suburb_name": "MURARRIE",
+    "median_weekly_rent": 450,
+    "median_monthly_mortgage": 2167
+  },
+  "NATHAN": {
+    "suburb_name": "NATHAN",
+    "median_weekly_rent": 300,
+    "median_monthly_mortgage": 1950
+  },
+  "NEW FARM": {
+    "suburb_name": "NEW FARM",
+    "median_weekly_rent": 405,
+    "median_monthly_mortgage": 2264
+  },
+  "NEWMARKET": {
+    "suburb_name": "NEWMARKET",
+    "median_weekly_rent": 383,
+    "median_monthly_mortgage": 2167
+  },
+  "NEWSTEAD": {
+    "suburb_name": "NEWSTEAD",
+    "median_weekly_rent": 490,
+    "median_monthly_mortgage": 2000
+  },
+  "NORMAN PARK": {
+    "suburb_name": "NORMAN PARK",
+    "median_weekly_rent": 450,
+    "median_monthly_mortgage": 2600
+  },
+  "NORTHGATE": {
+    "suburb_name": "NORTHGATE",
+    "median_weekly_rent": 360,
+    "median_monthly_mortgage": 2100
+  },
+  "NUDGEE": {
+    "suburb_name": "NUDGEE",
+    "median_weekly_rent": 488,
+    "median_monthly_mortgage": 2167
+  },
+  "NUDGEE BEACH": {
+    "suburb_name": "NUDGEE BEACH",
+    "median_weekly_rent": 455,
+    "median_monthly_mortgage": 2100
+  },
+  "NUNDAH": {
+    "suburb_name": "NUNDAH",
+    "median_weekly_rent": 375,
+    "median_monthly_mortgage": 1733
+  },
+  "OXLEY": {
+    "suburb_name": "OXLEY",
+    "median_weekly_rent": 400,
+    "median_monthly_mortgage": 1993
+  },
+  "PADDINGTON": {
+    "suburb_name": "PADDINGTON",
+    "median_weekly_rent": 470,
+    "median_monthly_mortgage": 2708
+  },
+  "PALLARA": {
+    "suburb_name": "PALLARA",
+    "median_weekly_rent": 460,
+    "median_monthly_mortgage": 2100
+  },
+  "PARKINSON": {
+    "suburb_name": "PARKINSON",
+    "median_weekly_rent": 450,
+    "median_monthly_mortgage": 1950
+  },
+  "PETRIE TERRACE": {
+    "suburb_name": "PETRIE TERRACE",
+    "median_weekly_rent": 435,
+    "median_monthly_mortgage": 2665
+  },
+  "PINJARRA HILLS": {
+    "suburb_name": "PINJARRA HILLS",
+    "median_weekly_rent": 490,
+    "median_monthly_mortgage": 2184
+  },
+  "PINKENBA": {
+    "suburb_name": "PINKENBA",
+    "median_weekly_rent": 350,
+    "median_monthly_mortgage": 1500
+  },
+  "PORT OF BRISBANE": {
+    "suburb_name": "PORT OF BRISBANE",
+    "median_weekly_rent": null,
+    "median_monthly_mortgage": null
+  },
+  "PULLENVALE": {
+    "suburb_name": "PULLENVALE",
+    "median_weekly_rent": 685,
+    "median_monthly_mortgage": 3033
+  },
+  "RANSOME": {
+    "suburb_name": "RANSOME",
+    "median_weekly_rent": 455,
+    "median_monthly_mortgage": 2327
+  },
+  "RED HILL": {
+    "suburb_name": "RED HILL",
+    "median_weekly_rent": 430,
+    "median_monthly_mortgage": 2700
+  },
+  "RICHLANDS": {
+    "suburb_name": "RICHLANDS",
+    "median_weekly_rent": 370,
+    "median_monthly_mortgage": 1517
+  },
+  "RIVERHILLS": {
+    "suburb_name": "RIVERHILLS",
+    "median_weekly_rent": 410,
+    "median_monthly_mortgage": 1820
+  },
+  "ROBERTSON": {
+    "suburb_name": "ROBERTSON",
+    "median_weekly_rent": 415,
+    "median_monthly_mortgage": 1950
+  },
+  "ROCHEDALE": {
+    "suburb_name": "ROCHEDALE",
+    "median_weekly_rent": 600,
+    "median_monthly_mortgage": 2600
+  },
+  "ROCKLEA": {
+    "suburb_name": "ROCKLEA",
+    "median_weekly_rent": 335,
+    "median_monthly_mortgage": 1635
+  },
+  "RUNCORN": {
+    "suburb_name": "RUNCORN",
+    "median_weekly_rent": 400,
+    "median_monthly_mortgage": 1600
+  },
+  "SALISBURY": {
+    "suburb_name": "SALISBURY",
+    "median_weekly_rent": 400,
+    "median_monthly_mortgage": 2000
+  },
+  "SANDGATE": {
+    "suburb_name": "SANDGATE",
+    "median_weekly_rent": 294,
+    "median_monthly_mortgage": 2167
+  },
+  "SEVEN HILLS": {
+    "suburb_name": "SEVEN HILLS",
+    "median_weekly_rent": 450,
+    "median_monthly_mortgage": 2700
+  },
+  "SEVENTEEN MILE ROCKS": {
+    "suburb_name": "SEVENTEEN MILE ROCKS",
+    "median_weekly_rent": 425,
+    "median_monthly_mortgage": 2156
+  },
+  "SHERWOOD": {
+    "suburb_name": "SHERWOOD",
+    "median_weekly_rent": 390,
+    "median_monthly_mortgage": 2197
+  },
+  "SHORNCLIFFE": {
+    "suburb_name": "SHORNCLIFFE",
+    "median_weekly_rent": 275,
+    "median_monthly_mortgage": 2201
+  },
+  "SINNAMON PARK": {
+    "suburb_name": "SINNAMON PARK",
+    "median_weekly_rent": 460,
+    "median_monthly_mortgage": 2167
+  },
+  "SOUTH BRISBANE": {
+    "suburb_name": "SOUTH BRISBANE",
+    "median_weekly_rent": 470,
+    "median_monthly_mortgage": 1950
+  },
+  "SPRING HILL": {
+    "suburb_name": "SPRING HILL",
+    "median_weekly_rent": 410,
+    "median_monthly_mortgage": 1700
+  },
+  "ST LUCIA": {
+    "suburb_name": "ST LUCIA",
+    "median_weekly_rent": 410,
+    "median_monthly_mortgage": 2000
+  },
+  "STAFFORD": {
+    "suburb_name": "STAFFORD",
+    "median_weekly_rent": 360,
+    "median_monthly_mortgage": 2000
+  },
+  "STAFFORD HEIGHTS": {
+    "suburb_name": "STAFFORD HEIGHTS",
+    "median_weekly_rent": 415,
+    "median_monthly_mortgage": 2167
+  },
+  "STONES CORNER": {
+    "suburb_name": "STONES CORNER",
+    "median_weekly_rent": 400,
+    "median_monthly_mortgage": 1733
+  },
+  "STRETTON": {
+    "suburb_name": "STRETTON",
+    "median_weekly_rent": 550,
+    "median_monthly_mortgage": 2167
+  },
+  "SUMNER": {
+    "suburb_name": "SUMNER",
+    "median_weekly_rent": 445,
+    "median_monthly_mortgage": 1800
+  },
+  "SUNNYBANK": {
+    "suburb_name": "SUNNYBANK",
+    "median_weekly_rent": 400,
+    "median_monthly_mortgage": 2000
+  },
+  "SUNNYBANK HILLS": {
+    "suburb_name": "SUNNYBANK HILLS",
+    "median_weekly_rent": 410,
+    "median_monthly_mortgage": 1853
+  },
+  "TAIGUM": {
+    "suburb_name": "TAIGUM",
+    "median_weekly_rent": 395,
+    "median_monthly_mortgage": 1680
+  },
+  "TARINGA": {
+    "suburb_name": "TARINGA",
+    "median_weekly_rent": 385,
+    "median_monthly_mortgage": 1900
+  },
+  "TARRAGINDI": {
+    "suburb_name": "TARRAGINDI",
+    "median_weekly_rent": 450,
+    "median_monthly_mortgage": 2459
+  },
+  "TENERIFFE": {
+    "suburb_name": "TENERIFFE",
+    "median_weekly_rent": 510,
+    "median_monthly_mortgage": 2167
+  },
+  "TENNYSON": {
+    "suburb_name": "TENNYSON",
+    "median_weekly_rent": 530,
+    "median_monthly_mortgage": 2348
+  },
+  "THE GAP": {
+    "suburb_name": "THE GAP",
+    "median_weekly_rent": 490,
+    "median_monthly_mortgage": 2253
+  },
+  "TINGALPA": {
+    "suburb_name": "TINGALPA",
+    "median_weekly_rent": 420,
+    "median_monthly_mortgage": 1863
+  },
+  "TOOWONG": {
+    "suburb_name": "TOOWONG",
+    "median_weekly_rent": 420,
+    "median_monthly_mortgage": 2000
+  },
+  "UPPER BROOKFIELD": {
+    "suburb_name": "UPPER BROOKFIELD",
+    "median_weekly_rent": 463,
+    "median_monthly_mortgage": 2600
+  },
+  "UPPER KEDRON": {
+    "suburb_name": "UPPER KEDRON",
+    "median_weekly_rent": 455,
+    "median_monthly_mortgage": 2383
+  },
+  "UPPER MOUNT GRAVATT": {
+    "suburb_name": "UPPER MOUNT GRAVATT",
+    "median_weekly_rent": 415,
+    "median_monthly_mortgage": 1954
+  },
+  "VIRGINIA": {
+    "suburb_name": "VIRGINIA",
+    "median_weekly_rent": 443,
+    "median_monthly_mortgage": 2200
+  },
+  "WACOL": {
+    "suburb_name": "WACOL",
+    "median_weekly_rent": 320,
+    "median_monthly_mortgage": 1387
+  },
+  "WAKERLEY": {
+    "suburb_name": "WAKERLEY",
+    "median_weekly_rent": 510,
+    "median_monthly_mortgage": 2362
+  },
+  "WAVELL HEIGHTS": {
+    "suburb_name": "WAVELL HEIGHTS",
+    "median_weekly_rent": 421,
+    "median_monthly_mortgage": 2450
+  },
+  "WEST END": {
+    "suburb_name": "WEST END",
+    "median_weekly_rent": 450,
+    "median_monthly_mortgage": 2100
+  },
+  "WESTLAKE": {
+    "suburb_name": "WESTLAKE",
+    "median_weekly_rent": 550,
+    "median_monthly_mortgage": 2247
+  },
+  "WILLAWONG": {
+    "suburb_name": "WILLAWONG",
+    "median_weekly_rent": 328,
+    "median_monthly_mortgage": 1734
+  },
+  "WILSTON": {
+    "suburb_name": "WILSTON",
+    "median_weekly_rent": 405,
+    "median_monthly_mortgage": 2700
+  },
+  "WINDSOR": {
+    "suburb_name": "WINDSOR",
+    "median_weekly_rent": 400,
+    "median_monthly_mortgage": 2300
+  },
+  "WISHART": {
+    "suburb_name": "WISHART",
+    "median_weekly_rent": 440,
+    "median_monthly_mortgage": 2000
+  },
+  "WOOLLOONGABBA": {
+    "suburb_name": "WOOLLOONGABBA",
+    "median_weekly_rent": 440,
+    "median_monthly_mortgage": 2000
+  },
+  "WOOLOOWIN": {
+    "suburb_name": "WOOLOOWIN",
+    "median_weekly_rent": 350,
+    "median_monthly_mortgage": 2275
+  },
+  "WYNNUM": {
+    "suburb_name": "WYNNUM",
+    "median_weekly_rent": 400,
+    "median_monthly_mortgage": 2167
+  },
+  "WYNNUM WEST": {
+    "suburb_name": "WYNNUM WEST",
+    "median_weekly_rent": 413,
+    "median_monthly_mortgage": 1950
+  },
+  "YEERONGPILLY": {
+    "suburb_name": "YEERONGPILLY",
+    "median_weekly_rent": 395,
+    "median_monthly_mortgage": 2000
+  },
+  "YERONGA": {
+    "suburb_name": "YERONGA",
+    "median_weekly_rent": 380,
+    "median_monthly_mortgage": 2167
+  },
+  "ZILLMERE": {
+    "suburb_name": "ZILLMERE",
+    "median_weekly_rent": 350,
+    "median_monthly_mortgage": 1677
+  }
+}
