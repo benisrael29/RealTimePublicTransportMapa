@@ -123,8 +123,13 @@ async function fetchRouteToShapeMapping(): Promise<Map<string, string>> {
           console.log('Trips.txt parsing stats:', {
             routesWithShapes,
             routesWithoutShapes,
+            tripsWithShapes,
             totalRoutesMapped: routeToShapeMap.size,
+            totalTripsMapped: tripToShapeMap.size,
           });
+          
+          // Cache trip to shape mapping
+          tripToShapeCache = tripToShapeMap;
           
           if (routeToShapeMap.size > 0) {
             console.log('✅ Successfully loaded trips.txt:', {
@@ -170,6 +175,12 @@ export async function GET() {
   }
 }
 
-// Export the fetch function for use in other modules
-export { fetchRouteToShapeMapping };
+async function fetchTripToShapeMapping(): Promise<Map<string, string>> {
+  // This will populate tripToShapeCache when fetchRouteToShapeMapping is called
+  await fetchRouteToShapeMapping();
+  return tripToShapeCache || new Map();
+}
+
+// Export the fetch functions for use in other modules
+export { fetchRouteToShapeMapping, fetchTripToShapeMapping };
 
