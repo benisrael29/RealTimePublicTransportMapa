@@ -45,9 +45,32 @@ async function fetchRouteTypes(): Promise<Map<string, number>> {
 
       if (response.ok) {
         const text = await response.text();
-        const lines = text.split('\n');
-        const headers = lines[0].split(',').map(h => h.trim());
+        const lines = text.split('\n').filter(line => line.trim());
         
+        if (lines.length === 0) continue;
+        
+        // Parse CSV header - handle quoted fields
+        const parseCSVLine = (line: string): string[] => {
+          const result: string[] = [];
+          let current = '';
+          let inQuotes = false;
+          
+          for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            if (char === '"') {
+              inQuotes = !inQuotes;
+            } else if (char === ',' && !inQuotes) {
+              result.push(current.trim());
+              current = '';
+            } else {
+              current += char;
+            }
+          }
+          result.push(current.trim());
+          return result;
+        };
+        
+        const headers = parseCSVLine(lines[0]);
         const routeIdIndex = headers.indexOf('route_id');
         const routeTypeIndex = headers.indexOf('route_type');
 
@@ -56,10 +79,11 @@ async function fetchRouteTypes(): Promise<Map<string, number>> {
             const line = lines[i].trim();
             if (!line) continue;
             
-            const values = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+            const values = parseCSVLine(line);
             if (values.length > Math.max(routeIdIndex, routeTypeIndex)) {
-              const routeId = values[routeIdIndex];
-              const routeType = parseInt(values[routeTypeIndex], 10);
+              const routeId = values[routeIdIndex].replace(/^"|"$/g, '');
+              const routeTypeStr = values[routeTypeIndex].replace(/^"|"$/g, '');
+              const routeType = parseInt(routeTypeStr, 10);
               
               if (routeId && !isNaN(routeType)) {
                 routeMap.set(routeId, routeType);
@@ -68,6 +92,29 @@ async function fetchRouteTypes(): Promise<Map<string, number>> {
           }
           
           if (routeMap.size > 0) {
+            // Log statistics
+            const typeCounts = {
+              train: 0,
+              bus: 0,
+              ferry: 0,
+              other: 0,
+            };
+            routeMap.forEach((type) => {
+              if (type === 2) typeCounts.train++;
+              else if (type === 3) typeCounts.bus++;
+              else if (type === 4) typeCounts.ferry++;
+              else typeCounts.other++;
+            });
+            
+            console.log('✅ Successfully loaded routes.txt:', {
+              totalRoutes: routeMap.size,
+              trains: typeCounts.train,
+              buses: typeCounts.bus,
+              ferries: typeCounts.ferry,
+              other: typeCounts.other,
+              source: url,
+            });
+            
             routeTypeCache = routeMap;
             cacheTimestamp = now;
             return routeMap;
@@ -81,6 +128,7 @@ async function fetchRouteTypes(): Promise<Map<string, number>> {
   }
 
   // Fallback: Return empty map if we can't fetch
+  console.warn('⚠️ Could not load routes.txt from any source. Route type classification will use fallback patterns.');
   routeTypeCache = routeMap;
   cacheTimestamp = now;
   return routeMap;
