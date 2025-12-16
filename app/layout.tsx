@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Brisbane Real-Time Transport Map",
+  title: "Brisbane Insights Map",
   description: "Real-time vehicle positions for Brisbane public transport",
 };
 

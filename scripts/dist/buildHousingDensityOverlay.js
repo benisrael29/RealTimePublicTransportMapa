@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import AdmZip from 'adm-zip';
-const HOUSING_DATAPACK_URL = 'https://www.abs.gov.au/census/find-census-data/datapacks/2021-census-datapacks/2021-census-geography-sa1-and-above-for-australia/2021_GCP_SA1_for_AUS_short-header.zip';
+const HOUSING_DATAPACK_URL = 'https://www.abs.gov.au/census/find-census-data/datapacks/download/2021_GCP_SA1_for_AUS_short-header.zip';
 const SA1_QUERY_URL = 'https://geo.abs.gov.au/arcgis/rest/services/ASGS2021/SA1/MapServer/0/query';
 const DEFAULT_SIMPLIFY_OFFSET_DEG = 0.00015;
 async function fileExists(p) {
@@ -69,15 +69,19 @@ function toNumber(v) {
 async function loadDwellingsBySa1FromDatapack(zipPath) {
     const zip = new AdmZip(zipPath);
     const entries = (zip.getEntries?.() ?? []);
-    const csvEntry = entries.find((e) => /2021_GCP_SA1_for_AUS\.csv$/i.test(String(e.entryName))) ??
+    const combinedCsvEntry = entries.find((e) => /2021_GCP_SA1_for_AUS\.csv$/i.test(String(e.entryName))) ??
         entries.find((e) => /GCP.*SA1.*AUS.*\.csv$/i.test(String(e.entryName))) ??
         null;
+    const g34CsvEntry = entries.find((e) => /2021Census_G34_.*_SA1\.csv$/i.test(String(e.entryName))) ??
+        entries.find((e) => /G34_.*_SA1\.csv$/i.test(String(e.entryName))) ??
+        null;
+    const csvEntry = combinedCsvEntry ?? g34CsvEntry;
     if (!csvEntry) {
         const sample = entries
-            .slice(0, 25)
+            .slice(0, 40)
             .map((e) => String(e.entryName))
             .join('\n');
-        throw new Error(`Could not find SA1 GCP CSV in datapack zip. Entries:\n${sample}`);
+        throw new Error(`Could not find a usable SA1 dwellings CSV in datapack zip. Entries:\n${sample}`);
     }
     const text = csvEntry.getData().toString('utf8');
     const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
@@ -85,7 +89,7 @@ async function loadDwellingsBySa1FromDatapack(zipPath) {
         throw new Error('Unexpected CSV content (too few rows)');
     const header = parseCsvLine(lines[0]).map((h) => h.trim());
     const sa1Idx = pickColumnIndex(header, (h) => /SA1_CODE/i.test(h));
-    const dwIdx = pickColumnIndex(header, (h) => /TOT[_ ]?DWELL/i.test(h));
+    const dwIdx = pickColumnIndex(header, (h) => /TOT[_ ]?DWELL/i.test(h) || /^Total_dwelings$/i.test(h) || /^Total_dwellings$/i.test(h));
     const out = new Map();
     for (let i = 1; i < lines.length; i++) {
         const cols = parseCsvLine(lines[i]);

@@ -13,8 +13,7 @@ type Sa1FeatureCollection = {
   features: Sa1Feature[];
 };
 
-const HOUSING_DATAPACK_URL =
-  'https://www.abs.gov.au/census/find-census-data/datapacks/2021-census-datapacks/2021-census-geography-sa1-and-above-for-australia/2021_GCP_SA1_for_AUS_short-header.zip';
+const HOUSING_DATAPACK_URL = 'https://www.abs.gov.au/census/find-census-data/datapacks/download/2021_GCP_SA1_for_AUS_short-header.zip';
 
 const SA1_QUERY_URL = 'https://geo.abs.gov.au/arcgis/rest/services/ASGS2021/SA1/MapServer/0/query';
 
@@ -84,17 +83,24 @@ function toNumber(v: unknown): number | null {
 async function loadDwellingsBySa1FromDatapack(zipPath: string): Promise<Map<string, number>> {
   const zip = new (AdmZip as unknown as any)(zipPath);
   const entries = ((zip as any).getEntries?.() ?? []) as any[];
-  const csvEntry =
+  const combinedCsvEntry =
     entries.find((e: any) => /2021_GCP_SA1_for_AUS\.csv$/i.test(String(e.entryName))) ??
     entries.find((e: any) => /GCP.*SA1.*AUS.*\.csv$/i.test(String(e.entryName))) ??
     null;
 
+  const g34CsvEntry =
+    entries.find((e: any) => /2021Census_G34_.*_SA1\.csv$/i.test(String(e.entryName))) ??
+    entries.find((e: any) => /G34_.*_SA1\.csv$/i.test(String(e.entryName))) ??
+    null;
+
+  const csvEntry = combinedCsvEntry ?? g34CsvEntry;
+
   if (!csvEntry) {
     const sample = entries
-      .slice(0, 25)
+      .slice(0, 40)
       .map((e: any) => String(e.entryName))
       .join('\n');
-    throw new Error(`Could not find SA1 GCP CSV in datapack zip. Entries:\n${sample}`);
+    throw new Error(`Could not find a usable SA1 dwellings CSV in datapack zip. Entries:\n${sample}`);
   }
 
   const text = (csvEntry as any).getData().toString('utf8');
@@ -103,7 +109,7 @@ async function loadDwellingsBySa1FromDatapack(zipPath: string): Promise<Map<stri
 
   const header = parseCsvLine(lines[0]).map((h) => h.trim());
   const sa1Idx = pickColumnIndex(header, (h) => /SA1_CODE/i.test(h));
-  const dwIdx = pickColumnIndex(header, (h) => /TOT[_ ]?DWELL/i.test(h));
+  const dwIdx = pickColumnIndex(header, (h) => /TOT[_ ]?DWELL/i.test(h) || /^Total_dwelings$/i.test(h) || /^Total_dwellings$/i.test(h));
 
   const out = new Map<string, number>();
   for (let i = 1; i < lines.length; i++) {

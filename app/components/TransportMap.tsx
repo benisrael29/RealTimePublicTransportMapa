@@ -35,6 +35,16 @@ type HousingLegend = {
   colors: string[];
 } | null;
 
+type HousingDensityLegend = {
+  breaks: number[];
+  colors: string[];
+} | null;
+
+type TempLegend = {
+  minTemp: number;
+  maxTemp: number;
+} | null;
+
 type PowerOutageFeature = {
   type: 'Feature';
   geometry: unknown;
@@ -720,60 +730,69 @@ const heatColorForDistance = (meters: number, maxMeters: number) => {
 function AccessibilityHeatmapLayer({
   enabled,
   stops,
-  userLocation,
 }: {
   enabled: boolean;
   stops: Stop[];
-  userLocation: LatLngLiteral | null;
 }) {
+  const map = useMap();
+  const [updateCounter, setUpdateCounter] = useState(0);
+  
   const index = useMemo(() => {
     if (!enabled || stops.length === 0) return null;
     return new StopSpatialIndex(stops, 900);
   }, [enabled, stops]);
 
+  useEffect(() => {
+    if (!enabled || !index) return;
+
+    const update = () => {
+      setUpdateCounter(c => c + 1);
+    };
+
+    map.on('moveend', update);
+    map.on('zoomend', update);
+    
+    return () => {
+      map.off('moveend', update);
+      map.off('zoomend', update);
+    };
+  }, [enabled, index, map]);
+
   const cells = useMemo(() => {
-    if (!enabled || !index || !userLocation) return null;
+    if (!enabled || !index) return null;
 
-    const radiusMeters = 3000;
-    const gridSize = 42;
-    const maxMeters = radiusMeters;
+    const bounds = map.getBounds();
+    const nw = bounds.getNorthWest();
+    const se = bounds.getSouthEast();
 
-    const lat = userLocation.lat;
-    const lng = userLocation.lng;
-    const latDelta = radiusMeters / 111_320;
-    const cosLat = Math.max(0.15, Math.cos((lat * Math.PI) / 180));
-    const lngDelta = radiusMeters / (111_320 * cosLat);
+    const gridSize = 80;
+    const maxMeters = 3000;
 
-    const latMin = lat - latDelta;
-    const latMax = lat + latDelta;
-    const lngMin = lng - lngDelta;
-    const lngMax = lng + lngDelta;
-
-    const latStep = (latMax - latMin) / gridSize;
-    const lngStep = (lngMax - lngMin) / gridSize;
+    const latStep = (se.lat - nw.lat) / gridSize;
+    const lngStep = (se.lng - nw.lng) / gridSize;
 
     const out: ReactElement[] = [];
     for (let i = 0; i < gridSize; i++) {
       for (let j = 0; j < gridSize; j++) {
-        const cLat = latMin + (i + 0.5) * latStep;
-        const cLng = lngMin + (j + 0.5) * lngStep;
-
-        const d0 = index.nearestDistanceMeters(cLat, cLng);
+        const lat = nw.lat + (i + 0.5) * latStep;
+        const lng = nw.lng + (j + 0.5) * lngStep;
+        
+        const d0 = index.nearestDistanceMeters(lat, lng);
         const d = d0 === null ? maxMeters : Math.min(d0, maxMeters);
         const { r, g, b } = heatColorForDistance(d, maxMeters);
 
-        const swLat = latMin + i * latStep;
-        const swLng = lngMin + j * lngStep;
-        const neLat = latMin + (i + 1) * latStep;
-        const neLng = lngMin + (j + 1) * lngStep;
+        const swLat = nw.lat + i * latStep;
+        const swLng = nw.lng + j * lngStep;
+        const neLat = nw.lat + (i + 1) * latStep;
+        const neLng = nw.lng + (j + 1) * lngStep;
 
         out.push(
           <Rectangle
-            key={`access-local-${i}-${j}`}
+            key={`access-${i}-${j}`}
             bounds={[[swLat, swLng], [neLat, neLng]]}
             pathOptions={{
               fillColor: `rgb(${r},${g},${b})`,
-              fillOpacity: 0.28,
+              fillOpacity: 0.35,
               stroke: false,
               interactive: false,
             }}
@@ -782,7 +801,7 @@ function AccessibilityHeatmapLayer({
       }
     }
     return out;
-  }, [enabled, index, userLocation?.lat, userLocation?.lng]);
+  }, [enabled, index, map, updateCounter]);
 
   return cells ? <>{cells}</> : null;
 }
@@ -1314,6 +1333,972 @@ function HousingChoroplethLayer({
   return null;
 }
 
+function HousingDensityLayer({
+  enabled,
+  onLegend,
+}: {
+  enabled: boolean;
+  onLegend: (legend: HousingDensityLegend) => void;
+}) {
+  const map = useMap();
+  const layerRef = useRef<L.GeoJSON | null>(null);
+
+  useEffect(() => {
+    if (!enabled) {
+      if (layerRef.current) {
+        layerRef.current.removeFrom(map);
+        layerRef.current = null;
+      }
+      onLegend(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const pickVal = (props: Record<string, unknown> | undefined | null) => {
+      const v = props?.dwellings_per_sqkm;
+      return typeof v === 'number' && Number.isFinite(v) ? v : null;
+    };
+
+    const computeLegend = (features: Array<{ properties?: Record<string, unknown> | null }>) => {
+      const values = features
+        .map((f) => pickVal(f.properties))
+        .filter((v): v is number => v !== null)
+        .sort((a, b) => a - b);
+
+      if (values.length === 0) return { breaks: [], colors: [] };
+
+      const quantile = (p: number) => {
+        const n = values.length;
+        if (n === 1) return values[0];
+        const idx = (n - 1) * p;
+        const lo = Math.floor(idx);
+        const hi = Math.ceil(idx);
+        if (lo === hi) return values[lo];
+        const t = idx - lo;
+        return values[lo] * (1 - t) + values[hi] * t;
+      };
+
+      const breaks = [quantile(0.2), quantile(0.4), quantile(0.6), quantile(0.8), quantile(1)];
+      const colors = ['#FFF7EC', '#FEE8C8', '#FDBB84', '#FC8D59', '#E34A33', '#B30000'];
+      return { breaks, colors };
+    };
+
+    const getFillColor = (v: number | null, legend: { breaks: number[]; colors: string[] }) => {
+      if (v === null) return '#E5E7EB';
+      const [b1, b2, b3, b4, b5] = legend.breaks;
+      if (v <= b1) return legend.colors[0];
+      if (v <= b2) return legend.colors[1];
+      if (v <= b3) return legend.colors[2];
+      if (v <= b4) return legend.colors[3];
+      if (v <= b5) return legend.colors[4];
+      return legend.colors[5];
+    };
+
+    const fmtInt = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v).toLocaleString('en-AU') : '—');
+    const fmtDensity = (v: unknown) =>
+      typeof v === 'number' && Number.isFinite(v) ? v.toLocaleString('en-AU', { maximumFractionDigits: 1 }) : '—';
+
+    const fetchAndRender = async () => {
+      try {
+        const resp = await fetch('/overlays/abs_2021_sa1_housing_density_greater_brisbane.geojson');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const geojson = (await resp.json()) as { type?: string; features?: any[] };
+        const features = Array.isArray(geojson?.features) ? geojson.features : [];
+
+        const legend = computeLegend(features);
+        if (!cancelled) onLegend(legend);
+
+        if (layerRef.current) {
+          layerRef.current.removeFrom(map);
+          layerRef.current = null;
+        }
+
+        const layer = L.geoJSON(geojson as any, {
+          pane: 'overlayPane',
+          style: (feature) => {
+            const props = (feature as any)?.properties as Record<string, unknown> | undefined;
+            const v = pickVal(props);
+            return {
+              color: '#111827',
+              weight: 1,
+              opacity: 0.35,
+              fillColor: getFillColor(v, legend),
+              fillOpacity: 0.45,
+            } as L.PathOptions;
+          },
+          onEachFeature: (feature, l) => {
+            const props = (feature as any)?.properties as Record<string, unknown> | undefined;
+            const sa1 = typeof props?.sa1_code_2021 === 'string' ? props.sa1_code_2021 : 'SA1';
+            const dwellings = fmtInt(props?.dwellings);
+            const density = fmtDensity(props?.dwellings_per_sqkm);
+            const area = fmtDensity(props?.area_sqkm);
+
+            const html = `
+              <div style="padding:10px;min-width:240px;">
+                <div style="font-weight:700;font-size:14px;color:#111827;margin-bottom:8px;">SA1 ${sa1}</div>
+                <div style="display:flex;flex-direction:column;gap:6px;">
+                  <div style="display:flex;justify-content:space-between;gap:12px;">
+                    <div style="color:#6B7280;font-size:12px;">Dwellings</div>
+                    <div style="color:#111827;font-size:12px;font-weight:600;">${dwellings}</div>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;gap:12px;">
+                    <div style="color:#6B7280;font-size:12px;">Density</div>
+                    <div style="color:#111827;font-size:12px;font-weight:700;">${density} / km²</div>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;gap:12px;">
+                    <div style="color:#6B7280;font-size:12px;">Area</div>
+                    <div style="color:#111827;font-size:12px;font-weight:600;">${area} km²</div>
+                  </div>
+                </div>
+                <div style="margin-top:10px;color:#9CA3AF;font-size:11px;">Source: ABS Census 2021 (GCP SA1) + ASGS 2021 SA1</div>
+              </div>
+            `;
+
+            l.bindPopup(html, { className: 'ios-popup' });
+
+            l.on('mouseover', () => {
+              (l as any).setStyle?.({ weight: 2, opacity: 0.7 });
+            });
+            l.on('mouseout', () => {
+              (l as any).setStyle?.({ weight: 1, opacity: 0.35 });
+            });
+          },
+        });
+
+        layer.addTo(map);
+        layerRef.current = layer;
+      } catch {
+        if (!cancelled) onLegend(null);
+      }
+    };
+
+    void fetchAndRender();
+
+    return () => {
+      cancelled = true;
+      if (layerRef.current) {
+        layerRef.current.removeFrom(map);
+        layerRef.current = null;
+      }
+    };
+  }, [enabled, map, onLegend]);
+
+  return null;
+}
+
+type WeatherStation = {
+  lat: number;
+  lon: number;
+  temp?: number;
+  windSpeed?: number;
+  windDir?: number;
+};
+
+type RainGauge = {
+  lat: number;
+  lon: number;
+  rainfall: number;
+  sensorId: string;
+  locationName?: string;
+};
+
+function WindLayer({ enabled }: { enabled: boolean }) {
+  const map = useMap();
+  const markersRef = useRef<L.Marker[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const lastFetchRef = useRef<number>(0);
+  const lastBoundsRef = useRef<{ north: number; south: number; east: number; west: number } | null>(null);
+  const fetchTimeoutRef = useRef<number | null>(null);
+  const MIN_FETCH_INTERVAL_MS = 5 * 60 * 1000;
+
+  useEffect(() => {
+    if (!enabled) {
+      markersRef.current.forEach((m) => m.removeFrom(map));
+      markersRef.current = [];
+      setIsLoading(false);
+      return;
+    }
+
+    const fetchAndRender = async () => {
+      const bounds = map.getBounds();
+      const currentBounds = {
+        north: bounds.getNorth(),
+        south: bounds.getSouth(),
+        east: bounds.getEast(),
+        west: bounds.getWest(),
+      };
+
+      const now = Date.now();
+      const timeSinceLastFetch = now - lastFetchRef.current;
+      
+      let shouldFetch = timeSinceLastFetch >= MIN_FETCH_INTERVAL_MS;
+      
+      if (!shouldFetch && lastBoundsRef.current) {
+        const lastBounds = lastBoundsRef.current;
+        const latRange = currentBounds.north - currentBounds.south;
+        const lonRange = currentBounds.east - currentBounds.west;
+        
+        const latDiff = Math.max(
+          Math.abs(currentBounds.north - lastBounds.north),
+          Math.abs(currentBounds.south - lastBounds.south)
+        );
+        const lonDiff = Math.max(
+          Math.abs(currentBounds.east - lastBounds.east),
+          Math.abs(currentBounds.west - lastBounds.west)
+        );
+        
+        const movedSignificantly = latDiff > latRange * 0.3 || lonDiff > lonRange * 0.3;
+        shouldFetch = movedSignificantly;
+      }
+      
+      if (!shouldFetch && lastFetchRef.current > 0) {
+        return;
+      }
+
+      const params = new URLSearchParams({
+        minLat: String(bounds.getSouth()),
+        maxLat: String(bounds.getNorth()),
+        minLon: String(bounds.getWest()),
+        maxLon: String(bounds.getEast()),
+      });
+
+      try {
+        const resp = await fetch(`/api/weather/stations?${params}`);
+        const data = (await resp.json()) as { stations?: WeatherStation[] };
+        const stations = Array.isArray(data?.stations) ? data.stations : [];
+
+        console.log('[WindLayer] Fetched stations:', stations.length);
+
+        markersRef.current.forEach((m) => m.removeFrom(map));
+        markersRef.current = [];
+
+        const validStations = stations.filter(
+          (s) => s.windSpeed !== undefined && s.windDir !== undefined && s.windSpeed > 0
+        );
+
+        console.log('[WindLayer] Valid wind stations:', validStations.length);
+
+        if (validStations.length === 0) {
+          lastFetchRef.current = now;
+          return;
+        }
+
+        const interpolateWind = (lat: number, lon: number): { speed: number; dir: number } | null => {
+          let sumSpeed = 0;
+          let sumDirX = 0;
+          let sumDirY = 0;
+          let weightSum = 0;
+
+          for (const s of validStations) {
+            const dx = (s.lon - lon) * 111320 * Math.cos((lat * Math.PI) / 180);
+            const dy = (s.lat - lat) * 111320;
+            const dist2 = dx * dx + dy * dy;
+            const dist = Math.sqrt(dist2);
+            
+            if (dist < 100000) {
+              const weight = 1 / (1 + dist2 / 10000000);
+              sumSpeed += s.windSpeed! * weight;
+              const radDir = ((s.windDir! - 90) * Math.PI) / 180;
+              sumDirX += Math.cos(radDir) * weight;
+              sumDirY += Math.sin(radDir) * weight;
+              weightSum += weight;
+            }
+          }
+
+          if (weightSum > 0) {
+            const avgSpeed = sumSpeed / weightSum;
+            const avgDir = (Math.atan2(sumDirY / weightSum, sumDirX / weightSum) * 180) / Math.PI + 90;
+            return { speed: avgSpeed, dir: (avgDir + 360) % 360 };
+          }
+          return null;
+        };
+
+        const renderArrow = (lat: number, lon: number, speed: number, dir: number, isOriginal: boolean) => {
+          const arrowLength = Math.min(32, Math.max(12, speed * 1.8));
+          const baseOpacity = isOriginal ? 0.85 : 0.5;
+          const strokeWidth = isOriginal ? 2.2 : 1.5;
+          const glowSize = isOriginal ? 6 : 3;
+          const animationDelay = Math.random() * 2;
+          const animationDuration = 2 + Math.random() * 1;
+
+          const icon = L.divIcon({
+            className: 'wind-arrow-marker',
+            html: `
+              <style>
+                @keyframes windPulse {
+                  0%, 100% { opacity: ${baseOpacity}; transform: scale(1); }
+                  50% { opacity: ${baseOpacity * 1.15}; transform: scale(1.05); }
+                }
+                @keyframes windFlow {
+                  0% { stroke-dashoffset: 0; }
+                  100% { stroke-dashoffset: -${arrowLength}; }
+                }
+                .wind-arrow-animated {
+                  animation: windPulse ${animationDuration}s ease-in-out infinite;
+                  animation-delay: ${animationDelay}s;
+                  filter: drop-shadow(0 0 ${glowSize}px rgba(37, 99, 235, 0.4));
+                }
+                .wind-arrow-line {
+                  animation: windFlow 1.5s linear infinite;
+                  stroke-dasharray: ${arrowLength * 0.3} ${arrowLength * 0.7};
+                }
+              </style>
+              <svg width="50" height="50" viewBox="0 0 50 50" xmlns="http://www.w3.org/2000/svg" class="wind-arrow-animated">
+                <defs>
+                  <linearGradient id="windGrad${lat}_${lon}" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" style="stop-color:rgb(59, 130, 246);stop-opacity:1" />
+                    <stop offset="100%" style="stop-color:rgb(96, 165, 250);stop-opacity:0.8" />
+                  </linearGradient>
+                  <filter id="windGlow${lat}_${lon}">
+                    <feGaussianBlur stdDeviation="1.5" result="coloredBlur"/>
+                    <feMerge>
+                      <feMergeNode in="coloredBlur"/>
+                      <feMergeNode in="SourceGraphic"/>
+                    </feMerge>
+                  </filter>
+                </defs>
+                <g transform="translate(25,25) rotate(${dir + 90})" filter="url(#windGlow${lat}_${lon})">
+                  <line 
+                    x1="0" y1="2" x2="0" y2="-${arrowLength - 2}" 
+                    stroke="url(#windGrad${lat}_${lon})" 
+                    stroke-width="${strokeWidth}" 
+                    stroke-linecap="round"
+                    class="wind-arrow-line"
+                  />
+                  <path 
+                    d="M 0,-${arrowLength} L -4,-${arrowLength + 7} L 0,-${arrowLength + 4} L 4,-${arrowLength + 7} Z" 
+                    fill="url(#windGrad${lat}_${lon})"
+                    stroke="rgba(37, 99, 235, 0.3)"
+                    stroke-width="0.5"
+                  />
+                  <circle cx="0" cy="0" r="${strokeWidth}" fill="rgba(59, 130, 246, 0.6)" />
+                </g>
+              </svg>
+            `,
+            iconSize: [50, 50],
+            iconAnchor: [25, 25],
+          });
+
+          const marker = L.marker([lat, lon], { icon });
+          if (isOriginal) {
+            marker.bindPopup(`
+              <div style="padding:10px;min-width:200px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                  <div style="width:32px;height:32px;background:linear-gradient(135deg,rgb(59,130,246),rgb(96,165,250));border-radius:8px;display:flex;align-items:center;justify-content:center;">
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="white" stroke-width="2">
+                      <path d="M3 10 Q 5 8, 7 10 T 11 10 T 15 10" stroke-linecap="round"/>
+                      <path d="M15 10 L 13 8 M 15 10 L 13 12" stroke-linecap="round"/>
+                    </svg>
+                  </div>
+                  <div style="font-weight:600;font-size:15px;color:#111827;">Wind</div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:6px;">
+                  <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <span style="font-size:13px;color:#6B7280;">Speed</span>
+                    <span style="font-size:15px;font-weight:600;color:#111827;">${speed.toFixed(1)} km/h</span>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <span style="font-size:13px;color:#6B7280;">Direction</span>
+                    <span style="font-size:15px;font-weight:600;color:#111827;">${dir.toFixed(0)}°</span>
+                  </div>
+                </div>
+              </div>
+            `, { className: 'ios-popup' });
+          }
+          marker.addTo(map);
+          markersRef.current.push(marker);
+        };
+
+        for (const station of validStations) {
+          renderArrow(station.lat, station.lon, station.windSpeed!, station.windDir!, true);
+        }
+
+        const zoom = map.getZoom();
+        const gridSpacing = zoom >= 12 ? 0.02 : zoom >= 10 ? 0.05 : 0.1;
+        const nw = { lat: currentBounds.north, lng: currentBounds.west };
+        const se = { lat: currentBounds.south, lng: currentBounds.east };
+        
+        let interpolatedCount = 0;
+        for (let lat = se.lat + gridSpacing / 2; lat < nw.lat; lat += gridSpacing) {
+          for (let lon = nw.lng + gridSpacing / 2; lon < se.lng; lon += gridSpacing) {
+            const wind = interpolateWind(lat, lon);
+            if (wind && wind.speed > 2) {
+              renderArrow(lat, lon, wind.speed, wind.dir, false);
+              interpolatedCount++;
+            }
+          }
+        }
+
+        console.log('[WindLayer] Rendered:', validStations.length, 'original +', interpolatedCount, 'interpolated =', markersRef.current.length, 'total arrows');
+
+        lastFetchRef.current = now;
+        lastBoundsRef.current = currentBounds;
+        setIsLoading(false);
+      } catch (err) {
+        console.error('WindLayer error:', err);
+        setIsLoading(false);
+      }
+    };
+
+    const onMoveEnd = () => {
+      if (fetchTimeoutRef.current !== null) {
+        window.clearTimeout(fetchTimeoutRef.current);
+      }
+      fetchTimeoutRef.current = window.setTimeout(() => {
+        void fetchAndRender();
+      }, 300);
+    };
+
+    map.on('moveend', onMoveEnd);
+    map.on('zoomend', onMoveEnd);
+    void fetchAndRender();
+
+    return () => {
+      map.off('moveend', onMoveEnd);
+      map.off('zoomend', onMoveEnd);
+      if (fetchTimeoutRef.current !== null) {
+        window.clearTimeout(fetchTimeoutRef.current);
+      }
+      markersRef.current.forEach((m) => m.removeFrom(map));
+      markersRef.current = [];
+    };
+  }, [enabled, map]);
+
+  return null;
+}
+
+function TemperatureLayer({ enabled, onLegend }: { enabled: boolean; onLegend: (legend: TempLegend) => void }) {
+  const map = useMap();
+  const layerRef = useRef<L.GeoJSON | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const lastFetchRef = useRef<number>(0);
+  const lastBoundsRef = useRef<{ north: number; south: number; east: number; west: number } | null>(null);
+  const fetchTimeoutRef = useRef<number | null>(null);
+  const MIN_FETCH_INTERVAL_MS = 5 * 60 * 1000;
+
+  useEffect(() => {
+    if (!enabled) {
+      if (layerRef.current) {
+        layerRef.current.removeFrom(map);
+        layerRef.current = null;
+      }
+      setIsLoading(false);
+      onLegend(null);
+      return;
+    }
+
+    const fetchAndRender = async () => {
+      const bounds = map.getBounds();
+      const currentBounds = {
+        north: bounds.getNorth(),
+        south: bounds.getSouth(),
+        east: bounds.getEast(),
+        west: bounds.getWest(),
+      };
+
+      const now = Date.now();
+      const timeSinceLastFetch = now - lastFetchRef.current;
+      
+      let shouldFetch = timeSinceLastFetch >= MIN_FETCH_INTERVAL_MS;
+      
+      if (!shouldFetch && lastBoundsRef.current) {
+        const lastBounds = lastBoundsRef.current;
+        const latRange = currentBounds.north - currentBounds.south;
+        const lonRange = currentBounds.east - currentBounds.west;
+        
+        const latDiff = Math.max(
+          Math.abs(currentBounds.north - lastBounds.north),
+          Math.abs(currentBounds.south - lastBounds.south)
+        );
+        const lonDiff = Math.max(
+          Math.abs(currentBounds.east - lastBounds.east),
+          Math.abs(currentBounds.west - lastBounds.west)
+        );
+        
+        const movedSignificantly = latDiff > latRange * 0.3 || lonDiff > lonRange * 0.3;
+        shouldFetch = movedSignificantly;
+      }
+      
+      if (!shouldFetch && lastFetchRef.current > 0) {
+        return;
+      }
+
+      if (!layerRef.current) {
+        setIsLoading(true);
+      }
+
+      const params = new URLSearchParams({
+        minLat: String(currentBounds.south),
+        maxLat: String(currentBounds.north),
+        minLon: String(currentBounds.west),
+        maxLon: String(currentBounds.east),
+      });
+
+      try {
+        const resp = await fetch(`/api/weather/stations?${params}`);
+        const data = (await resp.json()) as { stations?: WeatherStation[] };
+        const stations = Array.isArray(data?.stations) ? data.stations : [];
+
+        console.log('[TemperatureLayer] Fetched stations:', stations.length);
+
+        const temps = stations.filter((s) => s.temp !== undefined).map((s) => s.temp!);
+        if (temps.length === 0) {
+          console.log('[TemperatureLayer] No temperature data');
+          setIsLoading(false);
+          onLegend(null);
+          return;
+        }
+
+        const minTemp = Math.min(...temps);
+        const maxTemp = Math.max(...temps);
+        const tempRange = maxTemp - minTemp || 1;
+
+        onLegend({ minTemp, maxTemp });
+
+        const gridSize = 30;
+        const nw = { lat: currentBounds.north, lng: currentBounds.west };
+        const se = { lat: currentBounds.south, lng: currentBounds.east };
+         const latStep = (se.lat - nw.lat) / gridSize;
+         const lngStep = (se.lng - nw.lng) / gridSize;
+
+         const grid: (number | null)[][] = [];
+        for (let i = 0; i < gridSize; i++) {
+          grid[i] = [];
+          for (let j = 0; j < gridSize; j++) {
+            const lat = nw.lat + (i + 0.5) * latStep;
+            const lng = nw.lng + (j + 0.5) * lngStep;
+
+            let sum = 0;
+            let weightSum = 0;
+            for (const s of stations) {
+              if (s.temp === undefined) continue;
+              const dx = (s.lon - lng) * 111320 * Math.cos((lat * Math.PI) / 180);
+              const dy = (s.lat - lat) * 111320;
+              const dist2 = dx * dx + dy * dy;
+              const dist = Math.sqrt(dist2);
+              if (dist < 50000) {
+                const weight = 1 / (1 + dist2 / 1000000);
+                sum += s.temp * weight;
+                weightSum += weight;
+              }
+            }
+            grid[i][j] = weightSum > 0 ? sum / weightSum : null;
+          }
+        }
+
+        const features: Array<{ type: 'Feature'; geometry: { type: 'Polygon'; coordinates: [number, number][][] }; properties: { temp: number } }> = [];
+
+        for (let i = 0; i < gridSize - 1; i++) {
+          for (let j = 0; j < gridSize - 1; j++) {
+            const v00 = grid[i][j];
+            const v01 = grid[i][j + 1];
+            const v10 = grid[i + 1][j];
+            const v11 = grid[i + 1][j + 1];
+            if (v00 === null || v01 === null || v10 === null || v11 === null) continue;
+
+            const avgTemp = (v00 + v01 + v10 + v11) / 4;
+            const swLat = nw.lat + i * latStep;
+            const swLng = nw.lng + j * lngStep;
+            const neLat = nw.lat + (i + 1) * latStep;
+            const neLng = nw.lng + (j + 1) * lngStep;
+
+            const t = (avgTemp - minTemp) / tempRange;
+            const r = Math.round(255 * (1 - t));
+            const b = Math.round(255 * t);
+            const color = `rgb(${r},100,${b})`;
+
+            features.push({
+              type: 'Feature',
+              geometry: {
+                type: 'Polygon',
+                coordinates: [[[swLng, swLat], [neLng, swLat], [neLng, neLat], [swLng, neLat], [swLng, swLat]]],
+              },
+              properties: { temp: avgTemp },
+            });
+          }
+        }
+
+        if (layerRef.current) {
+          layerRef.current.removeFrom(map);
+          layerRef.current = null;
+        }
+
+        const layer = L.geoJSON(features as any, {
+          pane: 'overlayPane',
+          style: (feature) => {
+            const temp = (feature as any)?.properties?.temp;
+            if (temp === undefined) return {};
+            const t = (temp - minTemp) / tempRange;
+            const r = Math.round(255 * (1 - t));
+            const b = Math.round(255 * t);
+            return {
+              color: '#666',
+              weight: 0.5,
+              opacity: 0.3,
+              fillColor: `rgb(${r},100,${b})`,
+              fillOpacity: 0.4,
+            } as L.PathOptions;
+          },
+          onEachFeature: (feature, l) => {
+            const temp = (feature as any)?.properties?.temp;
+            if (temp !== undefined) {
+              l.bindPopup(`<div style="padding:8px;"><div style="font-weight:600;font-size:13px;">Temperature</div><div style="font-size:12px;">${temp.toFixed(1)}°C</div></div>`, { className: 'ios-popup' });
+            }
+          },
+        });
+
+        layer.addTo(map);
+        layerRef.current = layer;
+        console.log('[TemperatureLayer] Rendered', features.length, 'temperature grid cells');
+        lastFetchRef.current = now;
+        lastBoundsRef.current = currentBounds;
+        setIsLoading(false);
+      } catch (err) {
+        console.error('TemperatureLayer error:', err);
+        setIsLoading(false);
+        onLegend(null);
+      }
+    };
+
+    const onMoveEnd = () => {
+      if (fetchTimeoutRef.current !== null) {
+        window.clearTimeout(fetchTimeoutRef.current);
+      }
+      fetchTimeoutRef.current = window.setTimeout(() => {
+        void fetchAndRender();
+      }, 300);
+    };
+
+    map.on('moveend', onMoveEnd);
+    map.on('zoomend', onMoveEnd);
+    void fetchAndRender();
+
+    return () => {
+      map.off('moveend', onMoveEnd);
+      map.off('zoomend', onMoveEnd);
+      if (fetchTimeoutRef.current !== null) {
+        window.clearTimeout(fetchTimeoutRef.current);
+      }
+      if (layerRef.current) {
+        layerRef.current.removeFrom(map);
+        layerRef.current = null;
+      }
+      onLegend(null);
+    };
+  }, [enabled, map, onLegend]);
+
+  if (!enabled) return null;
+
+  return (
+    <>
+      {isLoading && (
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          background: 'rgba(255,255,255,0.95)',
+          backdropFilter: 'blur(20px)',
+          padding: '16px 24px',
+          borderRadius: '16px',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+          border: '1px solid rgba(0,0,0,0.1)',
+          zIndex: 1000,
+          fontFamily: '-apple-system,BlinkMacSystemFont,sans-serif',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px'
+        }}>
+          <div style={{
+            width: '20px',
+            height: '20px',
+            border: '2px solid #E5E7EB',
+            borderTop: '2px solid #3B82F6',
+            borderRadius: '50%',
+            animation: 'spin 0.8s linear infinite'
+          }} />
+          <div style={{ fontSize: '14px', color: '#374151', fontWeight: 500 }}>Loading temperature data...</div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function RainGaugeLayer({ enabled }: { enabled: boolean }) {
+  const map = useMap();
+  const markersRef = useRef<L.Marker[]>([]);
+  const layerRef = useRef<L.GeoJSON | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const lastFetchRef = useRef<number>(0);
+  const lastBoundsRef = useRef<{ north: number; south: number; east: number; west: number } | null>(null);
+  const fetchTimeoutRef = useRef<number | null>(null);
+  const MIN_FETCH_INTERVAL_MS = 5 * 60 * 1000;
+
+  useEffect(() => {
+    if (!enabled) {
+      markersRef.current.forEach((m) => m.removeFrom(map));
+      markersRef.current = [];
+      if (layerRef.current) {
+        layerRef.current.removeFrom(map);
+        layerRef.current = null;
+      }
+      setIsLoading(false);
+      return;
+    }
+
+    const fetchAndRender = async () => {
+      const bounds = map.getBounds();
+      const currentBounds = {
+        north: bounds.getNorth(),
+        south: bounds.getSouth(),
+        east: bounds.getEast(),
+        west: bounds.getWest(),
+      };
+
+      const now = Date.now();
+      const timeSinceLastFetch = now - lastFetchRef.current;
+      
+      let shouldFetch = timeSinceLastFetch >= MIN_FETCH_INTERVAL_MS;
+      
+      if (!shouldFetch && lastBoundsRef.current) {
+        const lastBounds = lastBoundsRef.current;
+        const latRange = currentBounds.north - currentBounds.south;
+        const lonRange = currentBounds.east - currentBounds.west;
+        
+        const latDiff = Math.max(
+          Math.abs(currentBounds.north - lastBounds.north),
+          Math.abs(currentBounds.south - lastBounds.south)
+        );
+        const lonDiff = Math.max(
+          Math.abs(currentBounds.east - lastBounds.east),
+          Math.abs(currentBounds.west - lastBounds.west)
+        );
+        
+        const movedSignificantly = latDiff > latRange * 0.3 || lonDiff > lonRange * 0.3;
+        shouldFetch = movedSignificantly;
+      }
+      
+      if (!shouldFetch && lastFetchRef.current > 0) {
+        return;
+      }
+
+      if (markersRef.current.length === 0) {
+        setIsLoading(true);
+      }
+
+      const params = new URLSearchParams({
+        minLat: String(currentBounds.south),
+        maxLat: String(currentBounds.north),
+        minLon: String(currentBounds.west),
+        maxLon: String(currentBounds.east),
+      });
+
+      try {
+        const resp = await fetch(`/api/weather/rain-gauges?${params}`);
+        const data = (await resp.json()) as { gauges?: RainGauge[] };
+        const gauges = Array.isArray(data?.gauges) ? data.gauges : [];
+
+        console.log('[RainGaugeLayer] Fetched gauges:', gauges.length);
+
+        markersRef.current.forEach((m) => m.removeFrom(map));
+        markersRef.current = [];
+
+        const maxRainfall = Math.max(...gauges.map((g) => g.rainfall), 0) || 1;
+
+        for (const gauge of gauges) {
+          const size = Math.max(6, Math.min(20, 6 + (gauge.rainfall / maxRainfall) * 14));
+          const opacity = Math.max(0.4, Math.min(0.9, 0.4 + (gauge.rainfall / maxRainfall) * 0.5));
+          const color = gauge.rainfall > 0 ? '#3B82F6' : '#9CA3AF';
+
+          const icon = L.divIcon({
+            className: 'rain-gauge-marker',
+            html: `
+              <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="${size / 2}" cy="${size / 2}" r="${size / 2 - 1}" fill="${color}" opacity="${opacity}" stroke="white" stroke-width="1.5" />
+              </svg>
+            `,
+            iconSize: [size, size],
+            iconAnchor: [size / 2, size / 2],
+          });
+
+          const marker = L.marker([gauge.lat, gauge.lon], { icon });
+          marker.bindPopup(`
+            <div style="padding:8px;min-width:180px;">
+              <div style="font-weight:600;font-size:13px;color:#111827;margin-bottom:4px;">${gauge.locationName || gauge.sensorId}</div>
+              <div style="font-size:12px;color:#374151;">Rainfall: ${gauge.rainfall.toFixed(2)} mm</div>
+            </div>
+          `);
+          marker.addTo(map);
+          markersRef.current.push(marker);
+        }
+
+        const zoom = map.getZoom();
+        if (gauges.length > 3 && zoom >= 10) {
+          const gridSize = 25;
+          const nw = { lat: currentBounds.north, lng: currentBounds.west };
+          const se = { lat: currentBounds.south, lng: currentBounds.east };
+          const latStep = (se.lat - nw.lat) / gridSize;
+          const lngStep = (se.lng - nw.lng) / gridSize;
+
+          const grid: number[][] = [];
+          for (let i = 0; i < gridSize; i++) {
+            grid[i] = [];
+            for (let j = 0; j < gridSize; j++) {
+              const lat = nw.lat + (i + 0.5) * latStep;
+              const lng = nw.lng + (j + 0.5) * lngStep;
+
+              let sum = 0;
+              let weightSum = 0;
+              for (const g of gauges) {
+                const dx = (g.lon - lng) * 111320 * Math.cos((lat * Math.PI) / 180);
+                const dy = (g.lat - lat) * 111320;
+                const dist2 = dx * dx + dy * dy;
+                const dist = Math.sqrt(dist2);
+                if (dist < 30000) {
+                  const weight = 1 / (1 + dist2 / 500000);
+                  sum += g.rainfall * weight;
+                  weightSum += weight;
+                }
+              }
+              grid[i][j] = weightSum > 0 ? sum / weightSum : 0;
+            }
+          }
+
+          const features: Array<{ type: 'Feature'; geometry: { type: 'Polygon'; coordinates: [number, number][][] }; properties: { rainfall: number } }> = [];
+
+          for (let i = 0; i < gridSize - 1; i++) {
+            for (let j = 0; j < gridSize - 1; j++) {
+              const v00 = grid[i][j];
+              const v01 = grid[i][j + 1];
+              const v10 = grid[i + 1][j];
+              const v11 = grid[i + 1][j + 1];
+              const avgRain = (v00 + v01 + v10 + v11) / 4;
+              if (avgRain < 0.01) continue;
+
+              const swLat = nw.lat + i * latStep;
+              const swLng = nw.lng + j * lngStep;
+              const neLat = nw.lat + (i + 1) * latStep;
+              const neLng = nw.lng + (j + 1) * lngStep;
+
+              const t = Math.min(1, avgRain / maxRainfall);
+              const opacity = 0.15 + t * 0.25;
+
+              features.push({
+                type: 'Feature',
+                geometry: {
+                  type: 'Polygon',
+                  coordinates: [[[swLng, swLat], [neLng, swLat], [neLng, neLat], [swLng, neLat], [swLng, swLat]]],
+                },
+                properties: { rainfall: avgRain },
+              });
+            }
+          }
+
+          if (layerRef.current) {
+            layerRef.current.removeFrom(map);
+            layerRef.current = null;
+          }
+
+          const layer = L.geoJSON(features as any, {
+            pane: 'overlayPane',
+            style: (feature) => {
+              const rain = (feature as any)?.properties?.rainfall || 0;
+              const t = Math.min(1, rain / maxRainfall);
+              const opacity = 0.15 + t * 0.25;
+              return {
+                color: '#3B82F6',
+                weight: 0,
+                fillColor: '#3B82F6',
+                fillOpacity: opacity,
+              } as L.PathOptions;
+            },
+            onEachFeature: (feature, l) => {
+              const rain = (feature as any)?.properties?.rainfall;
+              if (rain !== undefined && rain > 0.01) {
+                l.bindPopup(`<div style="padding:8px;"><div style="font-weight:600;font-size:13px;">Rainfall</div><div style="font-size:12px;">${rain.toFixed(2)} mm</div></div>`, { className: 'ios-popup' });
+              }
+            },
+          });
+
+          layer.addTo(map);
+          layerRef.current = layer;
+        }
+
+        lastFetchRef.current = now;
+        lastBoundsRef.current = currentBounds;
+        setIsLoading(false);
+      } catch (err) {
+        console.error('RainGaugeLayer error:', err);
+        setIsLoading(false);
+      }
+    };
+
+    const onMoveEnd = () => {
+      if (fetchTimeoutRef.current !== null) {
+        window.clearTimeout(fetchTimeoutRef.current);
+      }
+      fetchTimeoutRef.current = window.setTimeout(() => {
+        void fetchAndRender();
+      }, 300);
+    };
+
+    map.on('moveend', onMoveEnd);
+    map.on('zoomend', onMoveEnd);
+    void fetchAndRender();
+
+    return () => {
+      map.off('moveend', onMoveEnd);
+      map.off('zoomend', onMoveEnd);
+      if (fetchTimeoutRef.current !== null) {
+        window.clearTimeout(fetchTimeoutRef.current);
+      }
+      markersRef.current.forEach((m) => m.removeFrom(map));
+      markersRef.current = [];
+      if (layerRef.current) {
+        layerRef.current.removeFrom(map);
+        layerRef.current = null;
+      }
+    };
+  }, [enabled, map]);
+
+  if (!enabled) return null;
+
+  return (
+    <>
+      {isLoading && (
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          background: 'rgba(255,255,255,0.95)',
+          backdropFilter: 'blur(20px)',
+          padding: '16px 24px',
+          borderRadius: '16px',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+          border: '1px solid rgba(0,0,0,0.1)',
+          zIndex: 1000,
+          fontFamily: '-apple-system,BlinkMacSystemFont,sans-serif',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px'
+        }}>
+          <div style={{
+            width: '20px',
+            height: '20px',
+            border: '2px solid #E5E7EB',
+            borderTop: '2px solid #3B82F6',
+            borderRadius: '50%',
+            animation: 'spin 0.8s linear infinite'
+          }} />
+          <div style={{ fontSize: '14px', color: '#374151', fontWeight: 500 }}>Loading rain gauge data...</div>
+        </div>
+      )}
+    </>
+  );
+}
+
 
 export default function TransportMap() {
   const [vehicles, setVehicles] = useState<VehiclePosition[]>([]);
@@ -1333,13 +2318,15 @@ export default function TransportMap() {
   const [showPowerOutages, setShowPowerOutages] = useState(false);
   const [showBccRoadClosures, setShowBccRoadClosures] = useState(false);
   const [showQldTrafficClosures, setShowQldTrafficClosures] = useState(false);
-  const [showWeatherClouds, setShowWeatherClouds] = useState(false);
   const [showWeatherPrecip, setShowWeatherPrecip] = useState(false);
   const [showWeatherWind, setShowWeatherWind] = useState(false);
   const [showWeatherTemp, setShowWeatherTemp] = useState(false);
+  const [tempLegend, setTempLegend] = useState<TempLegend>(null);
   const [showHousingOverlay, setShowHousingOverlay] = useState(false);
+  const [showHousingDensityOverlay, setShowHousingDensityOverlay] = useState(false);
   const [housingMetric, setHousingMetric] = useState<HousingMetric>('rent');
   const [housingLegend, setHousingLegend] = useState<HousingLegend>(null);
+  const [housingDensityLegend, setHousingDensityLegend] = useState<HousingDensityLegend>(null);
   const [stops, setStops] = useState<Stop[]>([]);
   const [stopsLoading, setStopsLoading] = useState(false);
   const [stopsError, setStopsError] = useState<string | null>(null);
@@ -1418,6 +2405,7 @@ export default function TransportMap() {
   const layersMenuRef = useRef<HTMLDivElement | null>(null);
   const [expandRoadClosures, setExpandRoadClosures] = useState(false);
   const [expandHousing, setExpandHousing] = useState(false);
+  const [expandWeather, setExpandWeather] = useState(false);
 
   useEffect(() => {
     if (!showLayersMenu) return;
@@ -1741,11 +2729,27 @@ export default function TransportMap() {
     });
   }, [vehicles, prefetchRouteData, showLiveTransit]);
 
-  const gibsDate = useMemo(() => {
-    const d = new Date();
-    d.setUTCDate(d.getUTCDate() - 1);
-    return d.toISOString().slice(0, 10);
-  }, []);
+  const [rainViewerTimestamp, setRainViewerTimestamp] = useState<number | null>(null);
+
+  useEffect(() => {
+    const fetchRainViewerTimestamp = async () => {
+      try {
+        const resp = await fetch('https://api.rainviewer.com/public/weather-maps.json');
+        const data = await resp.json();
+        const timestamps = data?.radar?.past;
+        if (Array.isArray(timestamps) && timestamps.length > 0) {
+          setRainViewerTimestamp(timestamps[timestamps.length - 1].time);
+        }
+      } catch {
+        console.error('Failed to fetch RainViewer timestamp');
+      }
+    };
+    if (showWeatherPrecip) {
+      fetchRainViewerTimestamp();
+      const interval = setInterval(fetchRainViewerTimestamp, 10 * 60 * 1000);
+      return () => clearInterval(interval);
+    }
+  }, [showWeatherPrecip]);
 
   return (
     <div className="w-full h-screen relative overflow-hidden">
@@ -1763,29 +2767,26 @@ export default function TransportMap() {
           url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
           subdomains="abcd"
         />
-        {showWeatherClouds && (
+        {showWeatherPrecip && rainViewerTimestamp && (
           <TileLayer
-            attribution='&copy; <a href="https://earthdata.nasa.gov/gibs">NASA GIBS</a>'
-            url={`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/${gibsDate}/GoogleMapsCompatible/{z}/{y}/{x}.jpg`}
-            opacity={0.55}
-            maxZoom={11}
-          />
-        )}
-        {showWeatherPrecip && (
-          <TileLayer
-            attribution='&copy; <a href="https://earthdata.nasa.gov/gibs">NASA GIBS</a>'
-            url={`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/IMERG_Precipitation_Rate/default/${gibsDate}/GoogleMapsCompatible/{z}/{y}/{x}.png`}
-            opacity={0.6}
-            maxZoom={11}
+            key={`radar-${rainViewerTimestamp}`}
+            attribution='&copy; <a href="https://rainviewer.com/">RainViewer</a>'
+            url={`https://tilecache.rainviewer.com/v2/radar/${rainViewerTimestamp}/512/{z}/{x}/{y}/2/1_1.png`}
+            opacity={0.65}
+            maxZoom={18}
           />
         )}
         <MapUpdater mapRef={mapRef} />
-        <AccessibilityHeatmapLayer enabled={showAccessibility && !!accessUserLocation} stops={stops} userLocation={accessUserLocation} />
+        <AccessibilityHeatmapLayer enabled={showAccessibility && !loadingRoute} stops={stops} />
         <AccessibilityUserLocationLayer enabled={showAccessibility} userLocation={accessUserLocation} />
         <PowerOutageLayer enabled={showPowerOutages} />
         <QldTrafficClosuresLayer enabled={showQldTrafficClosures} />
         <BccRoadOccupanciesLayer enabled={showBccRoadClosures} />
         <HousingChoroplethLayer enabled={showHousingOverlay} metric={housingMetric} onLegend={setHousingLegend} />
+        <HousingDensityLayer enabled={showHousingDensityOverlay} onLegend={setHousingDensityLegend} />
+        <WindLayer enabled={showWeatherWind} />
+        <TemperatureLayer enabled={showWeatherTemp} onLegend={setTempLegend} />
+        <RainGaugeLayer enabled={showWeatherPrecip} />
         {showLiveTransit &&
           displayedRoute &&
           routeStopsRouteId === displayedRoute.routeId &&
@@ -2054,40 +3055,50 @@ export default function TransportMap() {
         </div>
       )}
 
-      {showHousingOverlay && (
+      {(showHousingOverlay || showHousingDensityOverlay) && (
         <div
           className="absolute left-6 bg-white/90 backdrop-blur-xl px-4 py-3 rounded-2xl shadow-2xl z-[1000] border border-gray-200/50 w-[300px]"
           style={{ bottom: showPowerOutages ? 170 : 24 }}
         >
           <div className="flex items-center justify-between mb-2">
             <div className="text-xs font-semibold text-gray-800">Housing (ABS 2021)</div>
-            <div className="text-[11px] text-gray-500">{housingMetric === 'rent' ? 'Rent' : 'Mortgage'}</div>
+            <div className="text-[11px] text-gray-500">
+              {showHousingOverlay && showHousingDensityOverlay
+                ? 'Medians + Density'
+                : showHousingDensityOverlay
+                  ? 'Density'
+                  : housingMetric === 'rent'
+                    ? 'Rent'
+                    : 'Mortgage'}
+            </div>
           </div>
 
-          <div className="space-y-2 text-[11px] text-gray-700">
-            <label className="flex items-center justify-between gap-3">
-              <span>Median weekly rent</span>
-              <input
-                type="radio"
-                name="housingMetric"
-                checked={housingMetric === 'rent'}
-                onChange={() => setHousingMetric('rent')}
-              />
-            </label>
-            <label className="flex items-center justify-between gap-3">
-              <span>Median monthly mortgage</span>
-              <input
-                type="radio"
-                name="housingMetric"
-                checked={housingMetric === 'mortgage'}
-                onChange={() => setHousingMetric('mortgage')}
-              />
-            </label>
-          </div>
+          {showHousingOverlay && (
+            <div className="space-y-2 text-[11px] text-gray-700">
+              <label className="flex items-center justify-between gap-3">
+                <span>Median weekly rent</span>
+                <input
+                  type="radio"
+                  name="housingMetric"
+                  checked={housingMetric === 'rent'}
+                  onChange={() => setHousingMetric('rent')}
+                />
+              </label>
+              <label className="flex items-center justify-between gap-3">
+                <span>Median monthly mortgage</span>
+                <input
+                  type="radio"
+                  name="housingMetric"
+                  checked={housingMetric === 'mortgage'}
+                  onChange={() => setHousingMetric('mortgage')}
+                />
+              </label>
+            </div>
+          )}
 
           <div className="mt-3 pt-2 border-t border-gray-200">
             <div className="text-[11px] text-gray-600 mb-2">Legend</div>
-            {housingLegend?.breaks?.length ? (
+            {showHousingOverlay && housingLegend?.breaks?.length ? (
               <div className="space-y-1 text-[11px] text-gray-700">
                 {(() => {
                   const fmt = (n: number) => `$${Math.round(n).toLocaleString('en-AU')}`;
@@ -2119,15 +3130,88 @@ export default function TransportMap() {
                   <span>No data</span>
                 </div>
               </div>
-            ) : (
+            ) : showHousingOverlay ? (
               <div className="text-[11px] text-gray-500">Loading…</div>
+            ) : null}
+
+            {showHousingDensityOverlay && (
+              <div className={showHousingOverlay ? 'mt-3 pt-3 border-t border-gray-200' : ''}>
+                <div className="text-[11px] text-gray-600 mb-2">Dwelling density (dwellings / km²)</div>
+                {housingDensityLegend?.breaks?.length ? (
+                  <div className="space-y-1 text-[11px] text-gray-700">
+                    {(() => {
+                      const fmt = (n: number) => Math.round(n).toLocaleString('en-AU');
+                      const bs = housingDensityLegend.breaks;
+                      const cs = housingDensityLegend.colors;
+                      const ranges: Array<{ color: string; label: string }> = [
+                        { color: cs[0], label: `≤ ${fmt(bs[0])}` },
+                        { color: cs[1], label: `≤ ${fmt(bs[1])}` },
+                        { color: cs[2], label: `≤ ${fmt(bs[2])}` },
+                        { color: cs[3], label: `≤ ${fmt(bs[3])}` },
+                        { color: cs[4], label: `≤ ${fmt(bs[4])}` },
+                        { color: cs[5], label: `> ${fmt(bs[4])}` },
+                      ];
+                      return (
+                        <div className="space-y-1 text-[11px] text-gray-700">
+                          {ranges.map((r, i) => (
+                            <div key={i} className="flex items-center gap-2">
+                              <div
+                                className="w-3 h-3 rounded-sm"
+                                style={{ backgroundColor: r.color, border: '1px solid rgba(17,24,39,0.25)' }}
+                              />
+                              <span>{r.label}</span>
+                            </div>
+                          ))}
+                          <div className="flex items-center gap-2 pt-1">
+                            <div
+                              className="w-3 h-3 rounded-sm"
+                              style={{ backgroundColor: '#E5E7EB', border: '1px solid rgba(17,24,39,0.15)' }}
+                            />
+                            <span>No data</span>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-gray-500">Loading…</div>
+                )}
+                <div className="mt-2 text-[11px] text-gray-500">
+                  Greater Brisbane SA1. Source: ABS Census 2021 (GCP SA1 dwellings) + ASGS 2021 SA1 area.
+                </div>
+              </div>
             )}
           </div>
         </div>
       )}
 
+      {showWeatherTemp && tempLegend && (
+        <div className="absolute bottom-6 left-6 bg-white/90 backdrop-blur-xl px-4 py-3 rounded-2xl shadow-2xl z-[1000] border border-gray-200/50 w-[240px]">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-xs font-semibold text-gray-800">Temperature</div>
+            <div className="text-[11px] text-gray-500">°C</div>
+          </div>
+          <div
+            className="h-6 w-full rounded-full mb-2"
+            style={{
+              background: 'linear-gradient(90deg, rgb(255,100,0) 0%, rgb(200,100,50) 25%, rgb(127,100,127) 50%, rgb(50,100,200) 75%, rgb(0,100,255) 100%)',
+            }}
+          />
+          <div className="flex justify-between text-[11px] text-gray-700 font-medium mb-2">
+            <span>{tempLegend.minTemp.toFixed(1)}°</span>
+            <span>{((tempLegend.minTemp + tempLegend.maxTemp) / 2).toFixed(1)}°</span>
+            <span>{tempLegend.maxTemp.toFixed(1)}°</span>
+          </div>
+          <div className="pt-2 border-t border-gray-200">
+            <div className="text-[11px] text-gray-500">
+              Data: Open-Meteo (forecast model)
+            </div>
+          </div>
+        </div>
+      )}
+
       {showPowerOutages && (
-        <div className="absolute bottom-6 left-6 bg-white/90 backdrop-blur-xl px-4 py-3 rounded-2xl shadow-2xl z-[1000] border border-gray-200/50 w-[260px]">
+        <div className="absolute left-6 bg-white/90 backdrop-blur-xl px-4 py-3 rounded-2xl shadow-2xl z-[1000] border border-gray-200/50 w-[260px]" style={{ bottom: showWeatherTemp && tempLegend ? '290px' : '24px' }}>
           <div className="flex items-center justify-between mb-2">
             <div className="text-xs font-semibold text-gray-800">Power outages</div>
             <div className="text-[11px] text-gray-500">Energex</div>
@@ -2266,64 +3350,69 @@ export default function TransportMap() {
               </label>
 
               <div className="pt-2 border-t border-gray-200/60">
-                <div className="text-sm font-semibold text-gray-800 mb-2">Weather</div>
-                <div className="space-y-2">
-                  <label className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-[12px] font-semibold text-gray-800">Clouds</div>
-                      <div className="text-[11px] text-gray-500">Satellite tiles (low zoom)</div>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={showWeatherClouds}
-                      onChange={(e) => setShowWeatherClouds(e.target.checked)}
-                      aria-label="Toggle weather clouds"
-                    />
-                  </label>
-                  <label className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-[12px] font-semibold text-gray-800">Precip</div>
-                      <div className="text-[11px] text-gray-500">Precip tiles + local gauges</div>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={showWeatherPrecip}
-                      onChange={(e) => setShowWeatherPrecip(e.target.checked)}
-                      aria-label="Toggle weather precipitation"
-                    />
-                  </label>
-                  <label className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-[12px] font-semibold text-gray-800">Wind</div>
-                      <div className="text-[11px] text-gray-500">Vectors (high zoom)</div>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={showWeatherWind}
-                      onChange={(e) => setShowWeatherWind(e.target.checked)}
-                      aria-label="Toggle weather wind"
-                    />
-                  </label>
-                  <label className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-[12px] font-semibold text-gray-800">Temperature</div>
-                      <div className="text-[11px] text-gray-500">Isotherms (high zoom)</div>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={showWeatherTemp}
-                      onChange={(e) => setShowWeatherTemp(e.target.checked)}
-                      aria-label="Toggle weather temperature"
-                    />
-                  </label>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-gray-800">Weather</div>
+                    <div className="text-[12px] text-gray-500">Open data overlays</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setExpandWeather((v) => !v)}
+                    className="text-[12px] font-semibold text-gray-700 hover:text-gray-900 transition-colors"
+                    aria-label="Toggle weather options"
+                    aria-expanded={expandWeather}
+                  >
+                    {expandWeather ? 'Hide' : 'Show'}
+                  </button>
                 </div>
+
+                {expandWeather && (
+                  <div className="mt-3 space-y-2 text-[12px] text-gray-700">
+                    <label className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-gray-800">Precipitation</div>
+                        <div className="text-[11px] text-gray-500">Radar + rain gauges</div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={showWeatherPrecip}
+                        onChange={(e) => setShowWeatherPrecip(e.target.checked)}
+                        aria-label="Toggle weather precipitation"
+                      />
+                    </label>
+                    <label className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-gray-800">Wind</div>
+                        <div className="text-[11px] text-gray-500">Arrows + interpolation</div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={showWeatherWind}
+                        onChange={(e) => setShowWeatherWind(e.target.checked)}
+                        aria-label="Toggle weather wind"
+                      />
+                    </label>
+                    <label className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-gray-800">Temperature</div>
+                        <div className="text-[11px] text-gray-500">Heatmap / contours</div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={showWeatherTemp}
+                        onChange={(e) => setShowWeatherTemp(e.target.checked)}
+                        aria-label="Toggle weather temperature"
+                      />
+                    </label>
+                  </div>
+                )}
               </div>
 
               <div className="pt-2 border-t border-gray-200/60">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-gray-800">Housing</div>
-                    <div className="text-[12px] text-gray-500">ABS Census 2021 (median rent + mortgage)</div>
+                    <div className="text-[12px] text-gray-500">ABS Census 2021 (medians + dwelling density)</div>
                   </div>
                   <button
                     type="button"
@@ -2340,7 +3429,7 @@ export default function TransportMap() {
                   <div className="mt-3 space-y-3 text-[12px] text-gray-700">
                     <label className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="text-[12px] font-semibold text-gray-800">Enable overlay</div>
+                        <div className="text-[12px] font-semibold text-gray-800">Medians overlay</div>
                       </div>
                       <input
                         type="checkbox"
@@ -2412,6 +3501,63 @@ export default function TransportMap() {
                       </div>
                     ) : showHousingOverlay ? (
                       <div className="pt-2 border-t border-gray-200/60 text-[12px] text-gray-500">Legend loading…</div>
+                    ) : null}
+
+                    <label className="flex items-center justify-between gap-3 pt-2 border-t border-gray-200/60">
+                      <div className="min-w-0">
+                        <div className="text-[12px] font-semibold text-gray-800">Dwelling density overlay</div>
+                        <div className="text-[11px] text-gray-500">SA1 dwellings per km² (Greater Brisbane)</div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={showHousingDensityOverlay}
+                        onChange={(e) => setShowHousingDensityOverlay(e.target.checked)}
+                        aria-label="Toggle housing density overlay"
+                      />
+                    </label>
+
+                    {showHousingDensityOverlay && housingDensityLegend?.breaks?.length ? (
+                      <div className="space-y-1">
+                        <div className="text-[12px] font-semibold text-gray-800">Legend (dwellings / km²)</div>
+                        {(() => {
+                          const fmt = (n: number) => Math.round(n).toLocaleString('en-AU');
+                          const bs = housingDensityLegend.breaks;
+                          const cs = housingDensityLegend.colors;
+                          const ranges: Array<{ color: string; label: string }> = [
+                            { color: cs[0], label: `≤ ${fmt(bs[0])}` },
+                            { color: cs[1], label: `≤ ${fmt(bs[1])}` },
+                            { color: cs[2], label: `≤ ${fmt(bs[2])}` },
+                            { color: cs[3], label: `≤ ${fmt(bs[3])}` },
+                            { color: cs[4], label: `≤ ${fmt(bs[4])}` },
+                            { color: cs[5], label: `> ${fmt(bs[4])}` },
+                          ];
+                          return (
+                            <div className="space-y-1 text-[12px] text-gray-700">
+                              {ranges.map((r, i) => (
+                                <div key={i} className="flex items-center gap-2">
+                                  <div
+                                    className="w-3 h-3 rounded-sm"
+                                    style={{ backgroundColor: r.color, border: '1px solid rgba(17,24,39,0.25)' }}
+                                  />
+                                  <span>{r.label}</span>
+                                </div>
+                              ))}
+                              <div className="flex items-center gap-2 pt-1">
+                                <div
+                                  className="w-3 h-3 rounded-sm"
+                                  style={{ backgroundColor: '#E5E7EB', border: '1px solid rgba(17,24,39,0.15)' }}
+                                />
+                                <span>No data</span>
+                              </div>
+                              <div className="pt-1 text-[11px] text-gray-500">
+                                Source: ABS Census 2021 (GCP SA1 dwellings) + ASGS 2021 SA1 area.
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    ) : showHousingDensityOverlay ? (
+                      <div className="text-[12px] text-gray-500">Legend loading…</div>
                     ) : null}
                   </div>
                 )}

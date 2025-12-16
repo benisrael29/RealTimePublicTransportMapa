@@ -24,20 +24,20 @@ function clamp(n: number, lo: number, hi: number) {
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const north = Number(searchParams.get('north'));
-    const south = Number(searchParams.get('south'));
-    const east = Number(searchParams.get('east'));
-    const west = Number(searchParams.get('west'));
+    const minLat = Number(searchParams.get('minLat'));
+    const maxLat = Number(searchParams.get('maxLat'));
+    const minLon = Number(searchParams.get('minLon'));
+    const maxLon = Number(searchParams.get('maxLon'));
     const grid = clamp(Number(searchParams.get('grid') ?? 5), 2, 9);
 
-    if (![north, south, east, west].every((v) => Number.isFinite(v))) {
-      return NextResponse.json({ error: 'Missing/invalid bbox params: north,south,east,west' }, { status: 400 });
+    if (![minLat, maxLat, minLon, maxLon].every((v) => Number.isFinite(v))) {
+      return NextResponse.json({ error: 'Missing/invalid bbox params: minLat,maxLat,minLon,maxLon' }, { status: 400 });
     }
 
-    const n = Math.max(north, south);
-    const s = Math.min(north, south);
-    const e = Math.max(east, west);
-    const w = Math.min(east, west);
+    const n = Math.max(minLat, maxLat);
+    const s = Math.min(minLat, maxLat);
+    const e = Math.max(minLon, maxLon);
+    const w = Math.min(minLon, maxLon);
 
     const lats: number[] = [];
     const lons: number[] = [];
@@ -79,7 +79,7 @@ export async function GET(req: Request) {
     const json = (await resp.json()) as unknown;
     const arr = Array.isArray(json) ? json : [json];
 
-    const points: SamplePoint[] = arr
+    const stations = arr
       .map((row) => {
         const obj = row as any;
         const lat = toNum(obj?.latitude);
@@ -89,15 +89,14 @@ export async function GET(req: Request) {
         return {
           lat,
           lon,
-          tempC: toNum(cur.temperature_2m),
-          windKmh: toNum(cur.wind_speed_10m),
-          windDirDeg: toNum(cur.wind_direction_10m),
-          precipMm: toNum(cur.precipitation),
+          temp: toNum(cur.temperature_2m) ?? undefined,
+          windSpeed: toNum(cur.wind_speed_10m) ?? undefined,
+          windDir: toNum(cur.wind_direction_10m) ?? undefined,
         };
       })
-      .filter((p): p is SamplePoint => !!p);
+      .filter((s): s is { lat: number; lon: number; temp: number | undefined; windSpeed: number | undefined; windDir: number | undefined } => !!s);
 
-    return NextResponse.json({ fetchedAt: Date.now(), points, source: 'open-meteo' });
+    return NextResponse.json({ fetchedAt: Date.now(), stations, source: 'open-meteo' });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : 'Failed to fetch stations' },

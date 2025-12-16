@@ -39,20 +39,20 @@ async function fetchJson(url: string, timeoutMs: number) {
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const north = Number(searchParams.get('north'));
-    const south = Number(searchParams.get('south'));
-    const east = Number(searchParams.get('east'));
-    const west = Number(searchParams.get('west'));
+    const minLat = Number(searchParams.get('minLat'));
+    const maxLat = Number(searchParams.get('maxLat'));
+    const minLon = Number(searchParams.get('minLon'));
+    const maxLon = Number(searchParams.get('maxLon'));
     const max = clamp(Number(searchParams.get('max') ?? 60), 1, 120);
 
-    if (![north, south, east, west].every((v) => Number.isFinite(v))) {
-      return NextResponse.json({ error: 'Missing/invalid bbox params: north,south,east,west' }, { status: 400 });
+    if (![minLat, maxLat, minLon, maxLon].every((v) => Number.isFinite(v))) {
+      return NextResponse.json({ error: 'Missing/invalid bbox params: minLat,maxLat,minLon,maxLon' }, { status: 400 });
     }
 
-    const n = Math.max(north, south);
-    const s = Math.min(north, south);
-    const e = Math.max(east, west);
-    const w = Math.min(east, west);
+    const n = Math.max(minLat, maxLat);
+    const s = Math.min(minLat, maxLat);
+    const e = Math.max(minLon, maxLon);
+    const w = Math.min(minLon, maxLon);
 
     const where = [
       `sensor_type = "Rainfall"`,
@@ -104,10 +104,16 @@ export async function GET(req: Request) {
     const latestRow = Array.isArray(latestJson?.results) ? latestJson.results[0] : null;
     const measuredAt = typeof latestRow?.measured === 'string' ? latestRow.measured : null;
 
-    const gauges: Gauge[] = sensors.map((s) => {
+    const gauges = sensors.map((s) => {
       const key = s.sensorId.toLowerCase();
       const mm = latestRow ? toNumText(latestRow[key]) : null;
-      return { sensorId: s.sensorId, name: s.name, lat: s.lat, lon: s.lon, mm };
+      return {
+        sensorId: s.sensorId,
+        locationName: s.name,
+        lat: s.lat,
+        lon: s.lon,
+        rainfall: mm ?? 0,
+      };
     });
 
     return NextResponse.json({ fetchedAt: Date.now(), measuredAt, gauges, source: 'bcc' });
