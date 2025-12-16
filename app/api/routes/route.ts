@@ -21,12 +21,6 @@ async function fetchRouteTypes(): Promise<Map<string, number>> {
     return routeTypeCache;
   }
 
-  const gtfsUrls = [
-    'https://gtfsrt.api.translink.com.au/GTFS/SEQ_GTFS.zip',
-    'https://transitfeeds.com/p/translink/21/latest/download',
-    'https://www.data.qld.gov.au/dataset/general-transit-feed-specification-gtfs-translink/resource/4b0e0a4e-8b1e-4b8e-9b1e-4b8e9b1e4b8e',
-  ];
-
   const routeMap = new Map<string, number>();
 
   try {

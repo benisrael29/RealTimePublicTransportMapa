@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import AdmZip from 'adm-zip';
 import { getGtfsZip as getGtfsZipShared } from '../../_gtfsZip';
+import { fetchStopTimes } from '../../stop-times/route';
+import { fetchRouteToFirstTripMapping } from '../../trips/route';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 86400; // Cache for 24 hours
@@ -64,76 +66,6 @@ function getEntryLines(zip: AdmZip, entryName: string): string[] | null {
   const text = entry.getData().toString('utf8');
   const lines = text.split('\n').filter(line => line.trim());
   return lines.length > 0 ? lines : null;
-}
-
-function findFirstTripIdForRoute(zip: AdmZip, routeId: string): string | null {
-  const lines = getEntryLines(zip, 'trips.txt');
-  if (!lines) return null;
-
-  const headers = parseCSVLine(lines[0]);
-  const routeIdIndex = headers.indexOf('route_id');
-  const tripIdIndex = headers.indexOf('trip_id');
-  if (routeIdIndex === -1 || tripIdIndex === -1) return null;
-
-  const routeVars = new Set(normalizeRouteIdVariations(routeId));
-
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-
-    const values = parseCSVLine(line);
-    if (values.length <= Math.max(routeIdIndex, tripIdIndex)) continue;
-
-    const fileRouteId = values[routeIdIndex].replace(/^"|"$/g, '').trim();
-    const tripId = values[tripIdIndex].replace(/^"|"$/g, '').trim();
-
-    if (tripId && routeVars.has(fileRouteId)) {
-      return tripId;
-    }
-  }
-
-  return null;
-}
-
-function getStopTimesForTrip(zip: AdmZip, tripId: string): Array<{ stop_id: string; stop_sequence: number }> {
-  const lines = getEntryLines(zip, 'stop_times.txt');
-  if (!lines) return [];
-
-  const headers = parseCSVLine(lines[0]);
-  const tripIdIndex = headers.indexOf('trip_id');
-  const stopIdIndex = headers.indexOf('stop_id');
-  const stopSequenceIndex = headers.indexOf('stop_sequence');
-  if (tripIdIndex === -1 || stopIdIndex === -1 || stopSequenceIndex === -1) return [];
-
-  const stopTimes: Array<{ stop_id: string; stop_sequence: number }> = [];
-  let collecting = false;
-
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-
-    const values = parseCSVLine(line);
-    if (values.length <= Math.max(tripIdIndex, stopIdIndex, stopSequenceIndex)) continue;
-
-    const fileTripId = values[tripIdIndex].replace(/^"|"$/g, '').trim();
-    if (!collecting) {
-      if (fileTripId !== tripId) continue;
-      collecting = true;
-    } else {
-      if (fileTripId !== tripId) break;
-    }
-
-    const stopId = values[stopIdIndex].replace(/^"|"$/g, '').trim();
-    const stopSequenceStr = values[stopSequenceIndex].replace(/^"|"$/g, '').trim();
-    const stopSequence = parseInt(stopSequenceStr, 10);
-
-    if (stopId && !Number.isNaN(stopSequence)) {
-      stopTimes.push({ stop_id: stopId, stop_sequence: stopSequence });
-    }
-  }
-
-  stopTimes.sort((a, b) => a.stop_sequence - b.stop_sequence);
-  return stopTimes;
 }
 
 function getStopsById(
@@ -218,7 +150,16 @@ export async function GET(
       );
     }
 
-    const tripId = findFirstTripIdForRoute(zip, routeId);
+    const routeToFirstTrip = await fetchRouteToFirstTripMapping();
+    const routeVars = normalizeRouteIdVariations(routeId);
+    let tripId: string | null = null;
+    for (const v of routeVars) {
+      const found = routeToFirstTrip.get(v);
+      if (found) {
+        tripId = found;
+        break;
+      }
+    }
     if (!tripId) {
       return NextResponse.json(
         { error: 'No trips found for this route', routeId },
@@ -226,7 +167,8 @@ export async function GET(
       );
     }
 
-    const stopTimes = getStopTimesForTrip(zip, tripId);
+    const stopTimesByTrip = await fetchStopTimes();
+    const stopTimes = stopTimesByTrip.get(tripId) ?? [];
     if (stopTimes.length === 0) {
       return NextResponse.json(
         { error: 'No stop times found for this route', routeId, tripId },

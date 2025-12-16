@@ -23,7 +23,8 @@ export async function getGtfsZip(revalidateSeconds: number): Promise<AdmZip> {
       headers: {
         'Accept': 'application/zip, application/x-zip-compressed, */*',
       },
-      next: { revalidate: revalidateSeconds },
+      // Avoid Next.js fetch cache (2MB/item limit); we handle caching ourselves via zipCache.
+      cache: 'no-store',
     });
 
     if (!response.ok) {

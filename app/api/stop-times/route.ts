@@ -85,7 +85,7 @@ async function fetchStopTimes(): Promise<Map<string, StopTime[]>> {
             }
             
             // Sort by stop_sequence for each trip
-            for (const [tripId, stopTimes] of stopTimesMap.entries()) {
+            for (const [, stopTimes] of stopTimesMap.entries()) {
               stopTimes.sort((a, b) => a.stop_sequence - b.stop_sequence);
             }
             

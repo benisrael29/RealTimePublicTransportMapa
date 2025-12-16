@@ -6,6 +6,7 @@ export const revalidate = 86400; // Cache for 24 hours
 
 let routeToShapeCache: Map<string, string> | null = null;
 let tripToShapeCache: Map<string, string> | null = null;
+let routeToFirstTripCache: Map<string, string> | null = null;
 let cacheTimestamp: number = 0;
 const CACHE_DURATION = 86400000; // 24 hours in milliseconds
 
@@ -29,6 +30,34 @@ function parseCSVLine(line: string): string[] {
   return result;
 }
 
+function addRouteVariations<T>(
+  map: Map<string, T>,
+  routeId: string,
+  value: T
+) {
+  const normalizedRouteId = routeId.trim();
+  if (!normalizedRouteId) return;
+
+  if (!map.has(normalizedRouteId)) {
+    map.set(normalizedRouteId, value);
+  }
+
+  const baseRouteId = normalizedRouteId.split(/[-_]/)[0];
+  if (baseRouteId && baseRouteId !== normalizedRouteId && !map.has(baseRouteId)) {
+    map.set(baseRouteId, value);
+  }
+
+  const upperRouteId = normalizedRouteId.toUpperCase();
+  if (upperRouteId !== normalizedRouteId && !map.has(upperRouteId)) {
+    map.set(upperRouteId, value);
+  }
+
+  const baseUpper = baseRouteId.toUpperCase();
+  if (baseUpper && baseUpper !== baseRouteId && !map.has(baseUpper)) {
+    map.set(baseUpper, value);
+  }
+}
+
 async function fetchRouteToShapeMapping(): Promise<Map<string, string>> {
   const now = Date.now();
   
@@ -39,6 +68,7 @@ async function fetchRouteToShapeMapping(): Promise<Map<string, string>> {
 
   const routeToShapeMap = new Map<string, string>();
   const tripToShapeMap = new Map<string, string>();
+  const routeToFirstTripMap = new Map<string, string>();
 
   try {
     const zip = await getGtfsZip(86400);
@@ -77,6 +107,10 @@ async function fetchRouteToShapeMapping(): Promise<Map<string, string>> {
               const shapeId = values[shapeIdIndex].replace(/^"|"$/g, '').trim();
               
               if (!routeId) continue;
+
+              if (tripId) {
+                addRouteVariations(routeToFirstTripMap, routeId, tripId);
+              }
               
               if (shapeId) {
                 routesWithShapes++;
@@ -87,23 +121,7 @@ async function fetchRouteToShapeMapping(): Promise<Map<string, string>> {
                   tripToShapeMap.set(tripId, shapeId);
                 }
                 
-                // Store both original and normalized versions for route_id
-                const normalizedRouteId = routeId;
-                if (!routeToShapeMap.has(normalizedRouteId)) {
-                  routeToShapeMap.set(normalizedRouteId, shapeId);
-                }
-                
-                // Also store base route ID (without suffixes) if different
-                const baseRouteId = normalizedRouteId.split(/[-_]/)[0];
-                if (baseRouteId !== normalizedRouteId && !routeToShapeMap.has(baseRouteId)) {
-                  routeToShapeMap.set(baseRouteId, shapeId);
-                }
-                
-                // Store uppercase version too
-                const upperRouteId = normalizedRouteId.toUpperCase();
-                if (upperRouteId !== normalizedRouteId && !routeToShapeMap.has(upperRouteId)) {
-                  routeToShapeMap.set(upperRouteId, shapeId);
-                }
+                addRouteVariations(routeToShapeMap, routeId, shapeId);
               } else {
                 routesWithoutShapes++;
               }
@@ -120,6 +138,7 @@ async function fetchRouteToShapeMapping(): Promise<Map<string, string>> {
           
           // Cache trip to shape mapping
           tripToShapeCache = tripToShapeMap;
+          routeToFirstTripCache = routeToFirstTripMap;
           
           if (routeToShapeMap.size > 0) {
             console.log('Successfully loaded trips.txt:', {
@@ -142,6 +161,7 @@ async function fetchRouteToShapeMapping(): Promise<Map<string, string>> {
   // Fallback: Return empty map if we can't fetch
   console.warn('Could not load trips.txt from any source.');
   routeToShapeCache = routeToShapeMap;
+  routeToFirstTripCache = routeToFirstTripMap;
   cacheTimestamp = now;
   return routeToShapeMap;
 }
@@ -171,6 +191,11 @@ async function fetchTripToShapeMapping(): Promise<Map<string, string>> {
   return tripToShapeCache || new Map();
 }
 
+async function fetchRouteToFirstTripMapping(): Promise<Map<string, string>> {
+  await fetchRouteToShapeMapping();
+  return routeToFirstTripCache || new Map();
+}
+
 // Export the fetch functions for use in other modules
-export { fetchRouteToShapeMapping, fetchTripToShapeMapping };
+export { fetchRouteToShapeMapping, fetchTripToShapeMapping, fetchRouteToFirstTripMapping };
 

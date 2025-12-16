@@ -22,17 +22,19 @@ async function fetchVehiclePositionsFromEndpoint(
 ): Promise<VehiclePosition[]> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 10000);
-  
-  const response = await fetch(endpoint, {
-    headers: {
-      'Accept': 'application/x-protobuf, application/protobuf, */*',
-      'User-Agent': 'Mozilla/5.0',
-    },
-    next: { revalidate: 0 },
-    signal: controller.signal,
-  });
-  
-  clearTimeout(timeoutId);
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      headers: {
+        'Accept': 'application/x-protobuf, application/protobuf, */*',
+        'User-Agent': 'Mozilla/5.0',
+      },
+      next: { revalidate: 0 },
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -108,7 +110,6 @@ export async function GET() {
         const vehicles = await fetchVehiclePositionsFromEndpoint(endpoint, routeTypes);
         if (vehicles.length > 0) {
           allVehicles = vehicles;
-          console.log(`Successfully fetched ${vehicles.length} vehicles from main endpoint: ${endpoint}`);
           break;
         }
       } catch (err) {
@@ -123,7 +124,6 @@ export async function GET() {
       try {
         const vehicles = await fetchVehiclePositionsFromEndpoint(endpoint, routeTypes);
         if (vehicles.length > 0) {
-          console.log(`Found ${vehicles.length} rail vehicles from: ${endpoint}`);
           // Merge with existing vehicles (avoid duplicates by ID)
           const existingIds = new Set(allVehicles.map(v => v.id));
           const newVehicles = vehicles.filter(v => !existingIds.has(v.id));
@@ -135,74 +135,7 @@ export async function GET() {
       }
     }
 
-    // Analyze the collected vehicles
     if (allVehicles.length > 0) {
-      let trainCount = 0;
-      let busCount = 0;
-      let ferryCount = 0;
-      let unknownCount = 0;
-      const routeIdSamples = new Set<string>();
-      const routeIdToType = new Map<string, number>();
-      const routeIdSamplesByType = {
-        train: [] as string[],
-        bus: [] as string[],
-        ferry: [] as string[],
-        unknown: [] as string[],
-      };
-      
-      for (const vehicle of allVehicles) {
-        const routeId = vehicle.routeId;
-        const routeType = vehicle.routeType;
-        
-        // Collect samples
-        if (routeId) {
-          routeIdSamples.add(routeId);
-          routeIdToType.set(routeId, routeType ?? -1);
-          
-          // Collect samples by type
-          if (routeType === 2 && routeIdSamplesByType.train.length < 10) {
-            routeIdSamplesByType.train.push(routeId);
-          } else if (routeType === 3 && routeIdSamplesByType.bus.length < 10) {
-            routeIdSamplesByType.bus.push(routeId);
-          } else if (routeType === 4 && routeIdSamplesByType.ferry.length < 10) {
-            routeIdSamplesByType.ferry.push(routeId);
-          } else if (routeType === undefined && routeIdSamplesByType.unknown.length < 20) {
-            routeIdSamplesByType.unknown.push(routeId);
-          }
-        }
-        
-        // Count by route type for debugging
-        if (routeType === 2) trainCount++;
-        else if (routeType === 3) busCount++;
-        else if (routeType === 4) ferryCount++;
-        else unknownCount++;
-      }
-      
-      // Detailed debug logging
-      console.log('=== Vehicle Feed Analysis ===');
-      console.log('Vehicle counts by routeType:', {
-        trains: trainCount,
-        buses: busCount,
-        ferries: ferryCount,
-        unknown: unknownCount,
-        total: allVehicles.length,
-        routeTypesMapSize: routeTypes.size,
-      });
-      console.log('Unique route IDs found:', routeIdSamples.size);
-      console.log('Route ID samples by type:', routeIdSamplesByType);
-      console.log('Sample route IDs (first 30):', Array.from(routeIdSamples).slice(0, 30));
-      
-      // Check if any route IDs look like trains but aren't classified
-      const potentialTrainRoutes = Array.from(routeIdSamples).filter(rid => {
-        const upper = rid.toUpperCase();
-        return (upper.match(/^(FG|BG|CL|IP|RB|SH|EX|GY|DO|CA|NA|RO|SP|VL|BE|KI|SPR|AIR|VLO|NGR|BRI|CAB|CLE|GOL|GYM|IPS|NOR|RED|SHO|SUN|WIL|CR|AR|GC|SC|TS|BN)/) ||
-               upper.match(/^[A-Z]{2,3}$/)) && routeIdToType.get(rid) !== 2;
-      });
-      
-      if (potentialTrainRoutes.length > 0) {
-        console.log('Potential train routes not classified as type 2:', potentialTrainRoutes.slice(0, 20));
-      }
-      
       return NextResponse.json({ vehicles: allVehicles, timestamp: Date.now() });
     }
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline, useMapEvents } from 'react-leaflet';
-import type { Polyline as LeafletPolyline } from 'leaflet';
+import type { LatLngLiteral, Map as LeafletMap, Polyline as LeafletPolyline } from 'leaflet';
 import L from 'leaflet';
 
 type VehicleType = 'bus' | 'train' | 'ferry' | 'unknown';
@@ -412,19 +412,17 @@ function RoutePolyline({ route }: { route: RouteShape }) {
 
   useEffect(() => {
     if (polylineRef.current && route.coordinates) {
-      console.log('Updating polyline with', route.coordinates.length, 'coordinates');
       polylineRef.current.setLatLngs(route.coordinates);
       
       // Fit map bounds to show the entire route
       try {
         const bounds = L.latLngBounds(route.coordinates);
-        console.log('Fitting map to bounds:', bounds);
         map.fitBounds(bounds, { 
           padding: [50, 50],
           maxZoom: 14
         });
       } catch (err) {
-        console.error('Error fitting bounds:', err);
+        void err;
       }
     }
   }, [route.coordinates, map]);
@@ -433,13 +431,6 @@ function RoutePolyline({ route }: { route: RouteShape }) {
     route.vehicleType ?? getVehicleTypeFromRouteType(route.routeType)
   );
   
-  console.log('RoutePolyline rendering with:', {
-    routeId: route.routeId,
-    coordinateCount: route.coordinates.length,
-    firstCoord: route.coordinates[0],
-    color,
-  });
-
   return (
     <Polyline
       ref={polylineRef}
@@ -473,6 +464,52 @@ export default function TransportMap() {
   const routeCacheRef = useRef<Map<string, { route: RouteShape; stops: RouteStop[] }>>(new Map());
   const prefetchInFlightRef = useRef<Set<string>>(new Set());
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const initialLoadTimeoutRef = useRef<number | null>(null);
+  const iconCacheRef = useRef<Map<string, L.DivIcon>>(new Map());
+  const mapRef = useRef<LeafletMap | null>(null);
+  const previousMapViewRef = useRef<{ center: LatLngLiteral; zoom: number } | null>(null);
+
+  const getCachedIcon = useCallback((key: string, factory: () => L.DivIcon) => {
+    const existing = iconCacheRef.current.get(key);
+    if (existing) return existing;
+    const created = factory();
+    iconCacheRef.current.set(key, created);
+    if (iconCacheRef.current.size > 120) {
+      const firstKey = iconCacheRef.current.keys().next().value as string | undefined;
+      if (firstKey) iconCacheRef.current.delete(firstKey);
+    }
+    return created;
+  }, []);
+
+  const setRouteCacheEntry = useCallback((routeId: string, entry: { route: RouteShape; stops: RouteStop[] }) => {
+    routeCacheRef.current.delete(routeId);
+    routeCacheRef.current.set(routeId, entry);
+    if (routeCacheRef.current.size > 200) {
+      const firstKey = routeCacheRef.current.keys().next().value as string | undefined;
+      if (firstKey) routeCacheRef.current.delete(firstKey);
+    }
+  }, []);
+
+  const captureMapViewBeforeRouteZoom = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (previousMapViewRef.current) return;
+
+    const center = map.getCenter();
+    previousMapViewRef.current = {
+      center: { lat: center.lat, lng: center.lng },
+      zoom: map.getZoom(),
+    };
+  }, []);
+
+  const restoreMapViewAfterRoute = useCallback(() => {
+    const map = mapRef.current;
+    const prev = previousMapViewRef.current;
+    if (!map || !prev) return;
+
+    map.setView(prev.center, prev.zoom, { animate: true });
+    previousMapViewRef.current = null;
+  }, []);
 
   const fetchVehicles = useCallback(async () => {
     try {
@@ -505,11 +542,7 @@ export default function TransportMap() {
           
           // Debug logging for trains (remove in production)
           if (type === 'train' && process.env.NODE_ENV === 'development') {
-            console.log('Train detected:', {
-              routeId: vehicle.routeId,
-              routeType: vehicle.routeType,
-              tripId: vehicle.tripId,
-            });
+            // no-op
           }
           
           return {
@@ -521,8 +554,11 @@ export default function TransportMap() {
       setError(null);
       setLoading(false);
       setIsInitialLoad(prev => {
-        if (prev) {
-          setTimeout(() => setIsInitialLoad(false), 1000);
+        if (prev && initialLoadTimeoutRef.current === null) {
+          initialLoadTimeoutRef.current = window.setTimeout(() => {
+            setIsInitialLoad(false);
+            initialLoadTimeoutRef.current = null;
+          }, 1000);
         }
         return prev;
       });
@@ -530,8 +566,11 @@ export default function TransportMap() {
       setError(err instanceof Error ? err.message : 'Unknown error');
       setLoading(false);
       setIsInitialLoad(prev => {
-        if (prev) {
-          setTimeout(() => setIsInitialLoad(false), 1000);
+        if (prev && initialLoadTimeoutRef.current === null) {
+          initialLoadTimeoutRef.current = window.setTimeout(() => {
+            setIsInitialLoad(false);
+            initialLoadTimeoutRef.current = null;
+          }, 1000);
         }
         return prev;
       });
@@ -561,17 +600,15 @@ export default function TransportMap() {
         vehicleType: vehicleType ?? routeData.vehicleType,
       };
 
-      routeCacheRef.current.set(routeId, { route: cachedRoute, stops });
+      setRouteCacheEntry(routeId, { route: cachedRoute, stops });
     } catch {
       // ignore
     } finally {
       prefetchInFlightRef.current.delete(routeId);
     }
-  }, []);
+  }, [setRouteCacheEntry]);
 
   const handleVehicleClick = async (vehicle: VehiclePosition) => {
-    console.log('Vehicle clicked:', vehicle);
-    
     if (!vehicle.routeId) {
       setRouteError('No route ID available for this vehicle');
       return;
@@ -584,7 +621,10 @@ export default function TransportMap() {
 
     const cached = routeCacheRef.current.get(vehicle.routeId);
     if (cached) {
+      routeCacheRef.current.delete(vehicle.routeId);
+      setRouteCacheEntry(vehicle.routeId, cached);
       setRouteError(null);
+      captureMapViewBeforeRouteZoom();
       setDisplayedRoute({
         ...cached.route,
         routeType:
@@ -635,6 +675,7 @@ export default function TransportMap() {
         return;
       }
 
+      captureMapViewBeforeRouteZoom();
       setDisplayedRoute({
         ...routeData,
         routeType:
@@ -645,8 +686,18 @@ export default function TransportMap() {
       });
       setRouteStops(stops);
       setRouteStopsRouteId(vehicle.routeId);
+      setRouteCacheEntry(vehicle.routeId, {
+        route: {
+          ...routeData,
+          routeType:
+            vehicle.routeType !== undefined && vehicle.routeType !== null
+              ? vehicle.routeType
+              : routeData.routeType,
+          vehicleType: effectiveVehicleType,
+        },
+        stops,
+      });
     } catch (err) {
-      console.error('Failed to fetch route:', err);
       setRouteError(err instanceof Error ? err.message : 'Failed to load route');
       setDisplayedRoute(null);
       setRouteStops([]);
@@ -659,6 +710,7 @@ export default function TransportMap() {
 
   const handleMapClick = () => {
     routeRequestIdRef.current += 1;
+    restoreMapViewAfterRoute();
     setDisplayedRoute(null);
     setRouteError(null);
     setSelectedVehicleId(null);
@@ -667,18 +719,6 @@ export default function TransportMap() {
     setLoadingRoute(false);
     setLoadingStops(false);
   };
-
-  useEffect(() => {
-    if (displayedRoute) {
-      console.log('DisplayedRoute state updated:', {
-        routeId: displayedRoute.routeId,
-        coordinateCount: displayedRoute.coordinates?.length,
-        routeType: displayedRoute.routeType,
-      });
-    } else {
-      console.log('DisplayedRoute cleared');
-    }
-  }, [displayedRoute]);
 
   useEffect(() => {
     fetchVehicles();
@@ -690,6 +730,10 @@ export default function TransportMap() {
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
+      }
+      if (initialLoadTimeoutRef.current !== null) {
+        clearTimeout(initialLoadTimeoutRef.current);
+        initialLoadTimeoutRef.current = null;
       }
     };
   }, [fetchVehicles]);
@@ -751,7 +795,7 @@ export default function TransportMap() {
                 const routeColor = getVehicleColor(
                   displayedRoute.vehicleType ?? getVehicleTypeFromRouteType(displayedRoute.routeType)
                 );
-                const stopIcon = createStopIcon(routeColor);
+                const stopIcon = getCachedIcon(`stop:${routeColor}`, () => createStopIcon(routeColor));
                 
                 return (
                   <Marker
@@ -785,9 +829,12 @@ export default function TransportMap() {
           const isSelected = selectedVehicleId === vehicle.id;
           const isRouteDisplayed = !!displayedRoute;
           
-          const markerIcon = isSelected 
-            ? createLargeVehicleIcon(color, vehicleType, 0.9)
-            : createSmallDotIcon(color, isRouteDisplayed ? 0.25 : 0.75);
+          const markerIcon = isSelected
+            ? getCachedIcon(`veh:large:${vehicleType}`, () => createLargeVehicleIcon(color, vehicleType, 0.9))
+            : getCachedIcon(
+                `veh:dot:${vehicleType}:${isRouteDisplayed ? 'dim' : 'norm'}`,
+                () => createSmallDotIcon(color, isRouteDisplayed ? 0.25 : 0.75)
+              );
           
           return (
             <AnimatedMarker
