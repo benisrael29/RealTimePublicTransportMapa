@@ -13,6 +13,27 @@ import L from 'leaflet';
 
 type VehicleType = 'bus' | 'train' | 'ferry' | 'unknown';
 
+type OutageType = 'unplanned' | 'planned_current' | 'planned_future';
+
+type PowerOutageFeature = {
+  type: 'Feature';
+  geometry: unknown;
+  properties?: {
+    outageType?: OutageType;
+    source?: string;
+    energex?: Record<string, unknown> | null;
+  };
+};
+
+type PowerOutageCollection = {
+  type: 'FeatureCollection';
+  features: PowerOutageFeature[];
+  meta?: {
+    fetchedAt?: number;
+    errors?: Array<{ feed: string; error: string }>;
+  };
+};
+
 interface VehiclePosition {
   id: string;
   latitude: number;
@@ -634,6 +655,356 @@ function AccessibilityHeatmapLayer({
   return <>{cells}</>;
 }
 
+function PowerOutageLayer({ enabled }: { enabled: boolean }) {
+  const map = useMap();
+  const layerRef = useRef<L.GeoJSON | null>(null);
+  const intervalRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!enabled) {
+      if (intervalRef.current !== null) {
+        window.clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      if (layerRef.current) {
+        layerRef.current.removeFrom(map);
+        layerRef.current = null;
+      }
+      return;
+    }
+
+    const toText = (v: unknown) => {
+      if (v === null || v === undefined) return null;
+      if (typeof v === 'string') return v.trim() || null;
+      if (typeof v === 'number') return Number.isFinite(v) ? String(v) : null;
+      return null;
+    };
+
+    const pickAny = (obj: Record<string, unknown> | null | undefined, keys: string[]) => {
+      if (!obj) return null;
+      for (const k of keys) {
+        const t = toText(obj[k]);
+        if (t) return t;
+      }
+      return null;
+    };
+
+    const styleFor = (outageType: OutageType | undefined): L.PathOptions => {
+      switch (outageType) {
+        case 'unplanned':
+          return { color: '#B91C1C', weight: 2, fillColor: '#EF4444', fillOpacity: 0.22 };
+        case 'planned_current':
+          return { color: '#A16207', weight: 2, fillColor: '#F59E0B', fillOpacity: 0.18 };
+        case 'planned_future':
+          return { color: '#92400E', weight: 1.5, fillColor: '#FBBF24', fillOpacity: 0.14 };
+        default:
+          return { color: '#6B7280', weight: 1.5, fillColor: '#9CA3AF', fillOpacity: 0.12 };
+      }
+    };
+
+    const buildPopupHtml = (energex: Record<string, unknown> | null | undefined, outageType?: OutageType) => {
+      const title =
+        outageType === 'unplanned'
+          ? 'Unplanned outage'
+          : outageType === 'planned_current'
+            ? 'Planned outage'
+            : outageType === 'planned_future'
+              ? 'Future planned outage'
+              : 'Power outage';
+
+      const suburb = pickAny(energex, ['suburb', 'locality', 'area', 'location']);
+      const status = pickAny(energex, ['status', 'outage_status', 'state']);
+      const customers = pickAny(energex, ['customers', 'customers_affected', 'affected_customers', 'cust', 'count']);
+      const start = pickAny(energex, ['start', 'start_time', 'startTime', 'start_date', 'outage_start']);
+      const etr = pickAny(energex, ['etr', 'estimated_restore', 'estimated_restoration', 'restoration', 'restore_time']);
+
+      const rows: Array<{ label: string; value: string }> = [];
+      if (suburb) rows.push({ label: 'Area', value: suburb });
+      if (status) rows.push({ label: 'Status', value: status });
+      if (customers) rows.push({ label: 'Customers', value: customers });
+      if (start) rows.push({ label: 'Start', value: start });
+      if (etr) rows.push({ label: 'ETR', value: etr });
+
+      const rowHtml = rows
+        .map(
+          (r) => `
+            <div style="display:flex;justify-content:space-between;gap:12px;">
+              <div style="color:#6B7280;font-size:12px;">${r.label}</div>
+              <div style="color:#111827;font-size:12px;font-weight:600;text-align:right;max-width:260px;overflow:hidden;text-overflow:ellipsis;">${r.value}</div>
+            </div>
+          `
+        )
+        .join('');
+
+      return `
+        <div style="padding:10px;min-width:240px;">
+          <div style="font-weight:700;font-size:14px;color:#111827;margin-bottom:8px;">${title}</div>
+          <div style="display:flex;flex-direction:column;gap:6px;">${rowHtml || '<div style="color:#6B7280;font-size:12px;">No details available</div>'}</div>
+          <div style="margin-top:10px;color:#9CA3AF;font-size:11px;">Source: Energex</div>
+        </div>
+      `;
+    };
+
+    const applyData = (geojson: PowerOutageCollection) => {
+      if (geojson?.type !== 'FeatureCollection' || !Array.isArray(geojson.features)) return;
+
+      if (layerRef.current) {
+        layerRef.current.removeFrom(map);
+        layerRef.current = null;
+      }
+
+      const layer = L.geoJSON(geojson as unknown as any, {
+        pane: 'overlayPane',
+        style: (feature) => {
+          const props = (feature as unknown as PowerOutageFeature)?.properties;
+          return styleFor(props?.outageType);
+        },
+        onEachFeature: (feature, l) => {
+          const props = (feature as unknown as PowerOutageFeature)?.properties;
+          const html = buildPopupHtml(props?.energex ?? null, props?.outageType);
+          l.bindPopup(html, { className: 'ios-popup' });
+        },
+      });
+
+      layer.addTo(map);
+      layerRef.current = layer;
+    };
+
+    const fetchAndRender = async () => {
+      try {
+        const resp = await fetch('/api/power-outages');
+        const json = (await resp.json()) as PowerOutageCollection;
+        applyData(json);
+      } catch {
+        // ignore
+      }
+    };
+
+    void fetchAndRender();
+    intervalRef.current = window.setInterval(() => {
+      void fetchAndRender();
+    }, 5 * 60 * 1000);
+
+    return () => {
+      if (intervalRef.current !== null) {
+        window.clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      if (layerRef.current) {
+        layerRef.current.removeFrom(map);
+        layerRef.current = null;
+      }
+    };
+  }, [enabled, map]);
+
+  return null;
+}
+
+function QldTrafficClosuresLayer({ enabled }: { enabled: boolean }) {
+  const map = useMap();
+  const layerRef = useRef<L.GeoJSON | null>(null);
+  const intervalRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!enabled) {
+      if (intervalRef.current !== null) {
+        window.clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      if (layerRef.current) {
+        layerRef.current.removeFrom(map);
+        layerRef.current = null;
+      }
+      return;
+    }
+
+    const styleFor = (props: any): L.PathOptions => {
+      const impactSubtype = typeof props?.impact?.impact_subtype === 'string' ? props.impact.impact_subtype : '';
+      const impactType = typeof props?.impact?.impact_type === 'string' ? props.impact.impact_type : '';
+      const full =
+        impactSubtype.toLowerCase().includes('closed') &&
+        (impactSubtype.toLowerCase().includes('all') || impactSubtype.toLowerCase().includes('to all'));
+      const color = full ? '#FF3B30' : impactType === 'Closures' ? '#FF9F0A' : '#8E8E93';
+      return { color, weight: 5, opacity: 0.85, dashArray: full ? undefined : '8 8' };
+    };
+
+    const buildPopupHtml = (props: any) => {
+      const rs = props?.road_summary ?? {};
+      const impact = props?.impact ?? {};
+      const titleParts: string[] = [];
+      if (rs?.road_name) titleParts.push(String(rs.road_name));
+      if (rs?.locality) titleParts.push(String(rs.locality));
+      const title = titleParts.join(' — ') || 'QLDTraffic';
+
+      return `
+        <div style="padding:10px;min-width:240px;">
+          <div style="font-weight:700;font-size:14px;color:#111827;margin-bottom:8px;">${title}</div>
+          <div style="color:#374151;font-size:12px;margin-bottom:8px;">${props?.event_type ?? ''}${props?.event_subtype ? ` — ${props.event_subtype}` : ''}</div>
+          <div style="color:#111827;font-size:12px;font-weight:600;margin-bottom:8px;">${impact?.impact_subtype ?? impact?.impact_type ?? ''}</div>
+          ${props?.description ? `<div style="color:#374151;font-size:12px;margin-bottom:8px;">${String(props.description)}</div>` : ''}
+          ${props?.advice ? `<div style="color:#6B7280;font-size:12px;">${String(props.advice)}</div>` : ''}
+          <div style="margin-top:10px;color:#9CA3AF;font-size:11px;">Source: QLDTraffic</div>
+        </div>
+      `;
+    };
+
+    const applyData = (geojson: any) => {
+      if (geojson?.type !== 'FeatureCollection' || !Array.isArray(geojson.features)) return;
+
+      if (layerRef.current) {
+        layerRef.current.removeFrom(map);
+        layerRef.current = null;
+      }
+
+      const layer = L.geoJSON(geojson, {
+        pane: 'overlayPane',
+        style: (feature) => styleFor((feature as any)?.properties ?? {}),
+        onEachFeature: (feature, l) => {
+          const props = (feature as any)?.properties ?? {};
+          l.bindPopup(buildPopupHtml(props), { className: 'ios-popup' });
+        },
+      });
+
+      layer.addTo(map);
+      layerRef.current = layer;
+    };
+
+    const fetchAndRender = async () => {
+      try {
+        const resp = await fetch('/api/road-closures/qldtraffic');
+        const json = (await resp.json()) as { geojson?: unknown };
+        if (!json?.geojson) return;
+        applyData(json.geojson);
+      } catch {
+        // ignore
+      }
+    };
+
+    void fetchAndRender();
+    intervalRef.current = window.setInterval(() => {
+      void fetchAndRender();
+    }, 60 * 1000);
+
+    return () => {
+      if (intervalRef.current !== null) {
+        window.clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      if (layerRef.current) {
+        layerRef.current.removeFrom(map);
+        layerRef.current = null;
+      }
+    };
+  }, [enabled, map]);
+
+  return null;
+}
+
+function BccRoadOccupanciesLayer({ enabled }: { enabled: boolean }) {
+  const map = useMap();
+  const layerRef = useRef<L.GeoJSON | null>(null);
+  const intervalRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!enabled) {
+      if (intervalRef.current !== null) {
+        window.clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      if (layerRef.current) {
+        layerRef.current.removeFrom(map);
+        layerRef.current = null;
+      }
+      return;
+    }
+
+    const styleFor = (props: any): L.PathOptions => {
+      const total = typeof props?.total === 'number' ? props.total : 0;
+      const full = typeof props?.full_closure_count === 'number' ? props.full_closure_count : 0;
+      const color = full > 0 ? '#FF3B30' : total > 0 ? '#FF9F0A' : '#8E8E93';
+      return { color, weight: 2, opacity: total > 0 ? 0.8 : 0, fillColor: color, fillOpacity: total > 0 ? 0.12 : 0 };
+    };
+
+    const buildPopupHtml = (props: any) => {
+      const suburb = props?.suburb ?? 'Suburb';
+      const total = props?.total ?? 0;
+      const items: any[] = Array.isArray(props?.items) ? props.items : [];
+      const rows = items.slice(0, 12).map((it) => {
+        const road = it?.road_primary ?? '';
+        const c1 = it?.first_cross_street ? ` / ${it.first_cross_street}` : '';
+        const c2 = it?.second_cross_street ? ` / ${it.second_cross_street}` : '';
+        const when = it?.start_date || it?.end_date ? `${it?.start_date ?? ''} → ${it?.end_date ?? ''}` : '';
+        return `
+          <div style="margin-bottom:8px;">
+            <div style="font-weight:600;font-size:12px;color:#111827;">${it?.closure_type ?? 'Occupancy'}</div>
+            <div style="font-size:12px;color:#374151;">${road}${c1}${c2}</div>
+            ${when ? `<div style="font-size:11px;color:#6B7280;">${when}</div>` : ''}
+          </div>
+        `;
+      });
+      const more = items.length > 12 ? `<div style="font-size:11px;color:#6B7280;">+${items.length - 12} more</div>` : '';
+      return `
+        <div style="padding:10px;min-width:260px;">
+          <div style="font-weight:700;font-size:14px;color:#111827;margin-bottom:8px;">${suburb} — ${total}</div>
+          ${rows.join('')}
+          ${more}
+          <div style="margin-top:10px;color:#9CA3AF;font-size:11px;">Source: Brisbane City Council</div>
+        </div>
+      `;
+    };
+
+    const applyData = (geojson: any) => {
+      if (geojson?.type !== 'FeatureCollection' || !Array.isArray(geojson.features)) return;
+
+      if (layerRef.current) {
+        layerRef.current.removeFrom(map);
+        layerRef.current = null;
+      }
+
+      const layer = L.geoJSON(geojson, {
+        pane: 'overlayPane',
+        style: (feature) => styleFor((feature as any)?.properties ?? {}),
+        onEachFeature: (feature, l) => {
+          const props = (feature as any)?.properties ?? {};
+          l.bindPopup(buildPopupHtml(props), { className: 'ios-popup' });
+        },
+      });
+
+      layer.addTo(map);
+      layerRef.current = layer;
+    };
+
+    const fetchAndRender = async () => {
+      try {
+        const resp = await fetch('/api/road-closures/bcc');
+        const json = (await resp.json()) as { geojson?: unknown };
+        if (!json?.geojson) return;
+        applyData(json.geojson);
+      } catch {
+        // ignore
+      }
+    };
+
+    void fetchAndRender();
+    intervalRef.current = window.setInterval(() => {
+      void fetchAndRender();
+    }, 60 * 1000);
+
+    return () => {
+      if (intervalRef.current !== null) {
+        window.clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      if (layerRef.current) {
+        layerRef.current.removeFrom(map);
+        layerRef.current = null;
+      }
+    };
+  }, [enabled, map]);
+
+  return null;
+}
+
 
 export default function TransportMap() {
   const [vehicles, setVehicles] = useState<VehiclePosition[]>([]);
@@ -641,6 +1012,10 @@ export default function TransportMap() {
   const [error, setError] = useState<string | null>(null);
   const [showInfo, setShowInfo] = useState(false);
   const [showAccessibility, setShowAccessibility] = useState(false);
+  const [showPowerOutages, setShowPowerOutages] = useState(false);
+  const [showRoadClosuresPanel, setShowRoadClosuresPanel] = useState(false);
+  const [showBccRoadClosures, setShowBccRoadClosures] = useState(false);
+  const [showQldTrafficClosures, setShowQldTrafficClosures] = useState(false);
   const [stops, setStops] = useState<Stop[]>([]);
   const [stopsLoading, setStopsLoading] = useState(false);
   const [stopsError, setStopsError] = useState<string | null>(null);
@@ -973,6 +1348,9 @@ export default function TransportMap() {
         />
         <MapUpdater mapRef={mapRef} />
         <AccessibilityHeatmapLayer enabled={showAccessibility && !loadingRoute} stops={stops} />
+        <PowerOutageLayer enabled={showPowerOutages} />
+        <QldTrafficClosuresLayer enabled={showQldTrafficClosures} />
+        <BccRoadOccupanciesLayer enabled={showBccRoadClosures} />
         {displayedRoute &&
           routeStopsRouteId === displayedRoute.routeId &&
           routeStops.length > 0 &&
@@ -1177,7 +1555,10 @@ export default function TransportMap() {
       )}
 
       {showAccessibility && !stopsLoading && !stopsError && stops.length > 0 && (
-        <div className="absolute bottom-6 left-6 bg-white/90 backdrop-blur-xl px-4 py-3 rounded-2xl shadow-2xl z-[1000] border border-gray-200/50 w-[240px]">
+        <div
+          className="absolute left-6 bg-white/90 backdrop-blur-xl px-4 py-3 rounded-2xl shadow-2xl z-[1000] border border-gray-200/50 w-[240px]"
+          style={{ bottom: showPowerOutages ? 170 : 24 }}
+        >
           <div className="flex items-center justify-between mb-2">
             <div className="text-xs font-semibold text-gray-800">Accessibility (nearest stop)</div>
             <div className="text-[11px] text-gray-500">Stops: {stops.length}</div>
@@ -1193,6 +1574,92 @@ export default function TransportMap() {
             <span>0 m</span>
             <span>2.5 km</span>
             <span>5 km+</span>
+          </div>
+        </div>
+      )}
+
+      {showRoadClosuresPanel && (
+        <div
+          className="absolute left-6 bg-white/90 backdrop-blur-xl px-4 py-3 rounded-2xl shadow-2xl z-[1000] border border-gray-200/50 w-[280px]"
+          style={{ bottom: showPowerOutages ? 170 : 24 }}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-xs font-semibold text-gray-800">Road closures</div>
+            <div className="text-[11px] text-gray-500">Overlays</div>
+          </div>
+          <div className="space-y-2 text-[11px] text-gray-700">
+            <label className="flex items-center justify-between gap-3">
+              <span>QLDTraffic (statewide)</span>
+              <input
+                type="checkbox"
+                checked={showQldTrafficClosures}
+                onChange={(e) => setShowQldTrafficClosures(e.target.checked)}
+              />
+            </label>
+            <label className="flex items-center justify-between gap-3">
+              <span>BCC planned occupancies (by suburb)</span>
+              <input
+                type="checkbox"
+                checked={showBccRoadClosures}
+                onChange={(e) => setShowBccRoadClosures(e.target.checked)}
+              />
+            </label>
+          </div>
+          <div className="mt-3 pt-2 border-t border-gray-200 space-y-2 text-[11px] text-gray-700">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: 'rgba(255,59,48,0.25)', border: '1px solid rgba(255,59,48,0.7)' }} />
+              <span>Full closure</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: 'rgba(255,159,10,0.22)', border: '1px solid rgba(255,159,10,0.7)' }} />
+              <span>Partial / lane restrictions</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPowerOutages && (
+        <div className="absolute bottom-6 left-6 bg-white/90 backdrop-blur-xl px-4 py-3 rounded-2xl shadow-2xl z-[1000] border border-gray-200/50 w-[260px]">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-xs font-semibold text-gray-800">Power outages</div>
+            <div className="text-[11px] text-gray-500">Energex</div>
+          </div>
+          <div className="space-y-2 text-[11px] text-gray-700">
+            <div className="flex items-center gap-2">
+              <div
+                className="w-3 h-3 rounded-sm"
+                style={{ backgroundColor: 'rgba(239,68,68,0.35)', border: '1px solid rgba(185,28,28,0.7)' }}
+              />
+              <span>Unplanned</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div
+                className="w-3 h-3 rounded-sm"
+                style={{ backgroundColor: 'rgba(245,158,11,0.28)', border: '1px solid rgba(161,98,7,0.7)' }}
+              />
+              <span>Planned (current)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div
+                className="w-3 h-3 rounded-sm"
+                style={{ backgroundColor: 'rgba(251,191,36,0.22)', border: '1px solid rgba(146,64,14,0.7)' }}
+              />
+              <span>Planned (future)</span>
+            </div>
+          </div>
+          <div className="mt-3 pt-2 border-t border-gray-200">
+            <div className="text-[11px] text-gray-500">
+              Data: Energex. Use subject to{' '}
+              <a
+                className="underline"
+                href="https://www.energex.com.au/contact-us/terms-of-use"
+                target="_blank"
+                rel="noreferrer"
+              >
+                terms
+              </a>
+              .
+            </div>
           </div>
         </div>
       )}
@@ -1219,12 +1686,32 @@ export default function TransportMap() {
       </button>
 
       <button
+        onClick={() => setShowRoadClosuresPanel((v) => !v)}
+        className="absolute top-6 right-52 bg-white/90 backdrop-blur-xl px-4 py-3 rounded-2xl shadow-2xl z-[1000] border border-gray-200/50 hover:bg-white transition-colors"
+        aria-label="Toggle road closures overlays"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 24 24" fill={showRoadClosuresPanel ? '#FF3B30' : 'none'} stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4 20h16M6 20V9a2 2 0 012-2h8a2 2 0 012 2v11M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2" />
+        </svg>
+      </button>
+
+      <button
         onClick={() => setShowAccessibility((v) => !v)}
         className="absolute top-6 right-20 bg-white/90 backdrop-blur-xl px-4 py-3 rounded-2xl shadow-2xl z-[1000] border border-gray-200/50 hover:bg-white transition-colors"
         aria-label="Toggle accessibility heatmap"
       >
         <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 24 24" fill={showAccessibility ? '#007AFF' : 'none'} stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h4l2-6 4 12 2-6h4" />
+        </svg>
+      </button>
+
+      <button
+        onClick={() => setShowPowerOutages((v) => !v)}
+        className="absolute top-6 right-36 bg-white/90 backdrop-blur-xl px-4 py-3 rounded-2xl shadow-2xl z-[1000] border border-gray-200/50 hover:bg-white transition-colors"
+        aria-label="Toggle power outages"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 24 24" fill={showPowerOutages ? '#F59E0B' : 'none'} stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M13 2L3 14h7l-1 8 12-14h-7l-1-6z" />
         </svg>
       </button>
 
