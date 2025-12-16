@@ -41,8 +41,7 @@ type HousingDensityLegend = {
 } | null;
 
 type TempLegend = {
-  minTemp: number;
-  maxTemp: number;
+  hasData: boolean;
 } | null;
 
 type PowerOutageFeature = {
@@ -1850,11 +1849,7 @@ function TemperatureLayer({ enabled, onLegend }: { enabled: boolean; onLegend: (
           return;
         }
 
-        const minTemp = Math.min(...temps);
-        const maxTemp = Math.max(...temps);
-        const tempRange = maxTemp - minTemp || 1;
-
-        onLegend({ minTemp, maxTemp });
+        onLegend({ hasData: true });
 
         const gridSize = 30;
         const nw = { lat: currentBounds.north, lng: currentBounds.west };
@@ -1903,11 +1898,6 @@ function TemperatureLayer({ enabled, onLegend }: { enabled: boolean; onLegend: (
             const neLat = nw.lat + (i + 1) * latStep;
             const neLng = nw.lng + (j + 1) * lngStep;
 
-            const t = (avgTemp - minTemp) / tempRange;
-            const r = Math.round(255 * (1 - t));
-            const b = Math.round(255 * t);
-            const color = `rgb(${r},100,${b})`;
-
             features.push({
               type: 'Feature',
               geometry: {
@@ -1924,14 +1914,18 @@ function TemperatureLayer({ enabled, onLegend }: { enabled: boolean; onLegend: (
           layerRef.current = null;
         }
 
+        const TEMP_MIN = 10; // °C - cold end of scale (blue)
+        const TEMP_MAX = 35; // °C - hot end of scale (red)
+
         const layer = L.geoJSON(features as any, {
           pane: 'overlayPane',
           style: (feature) => {
             const temp = (feature as any)?.properties?.temp;
             if (temp === undefined) return {};
-            const t = (temp - minTemp) / tempRange;
-            const r = Math.round(255 * (1 - t));
-            const b = Math.round(255 * t);
+            // Normalize to 0-1 using absolute scale
+            const t = Math.max(0, Math.min(1, (temp - TEMP_MIN) / (TEMP_MAX - TEMP_MIN)));
+            const r = Math.round(255 * t);     // red increases with temperature
+            const b = Math.round(255 * (1 - t)); // blue decreases with temperature
             return {
               color: '#666',
               weight: 0.5,
@@ -3194,13 +3188,13 @@ export default function TransportMap() {
           <div
             className="h-6 w-full rounded-full mb-2"
             style={{
-              background: 'linear-gradient(90deg, rgb(255,100,0) 0%, rgb(200,100,50) 25%, rgb(127,100,127) 50%, rgb(50,100,200) 75%, rgb(0,100,255) 100%)',
+              background: 'linear-gradient(90deg, rgb(0,100,255) 0%, rgb(50,100,200) 25%, rgb(127,100,127) 50%, rgb(200,100,50) 75%, rgb(255,100,0) 100%)',
             }}
           />
           <div className="flex justify-between text-[11px] text-gray-700 font-medium mb-2">
-            <span>{tempLegend.minTemp.toFixed(1)}°</span>
-            <span>{((tempLegend.minTemp + tempLegend.maxTemp) / 2).toFixed(1)}°</span>
-            <span>{tempLegend.maxTemp.toFixed(1)}°</span>
+            <span>10°</span>
+            <span>22.5°</span>
+            <span>35°</span>
           </div>
           <div className="pt-2 border-t border-gray-200">
             <div className="text-[11px] text-gray-500">

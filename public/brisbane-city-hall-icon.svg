@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Clock tower top -->
+  <rect x="26" y="4" width="12" height="4" fill="black"/>
+  
+  <!-- Clock tower dome/spire -->
+  <polygon points="32,2 28,4 36,4" fill="black"/>
+  
+  <!-- Clock face -->
+  <circle cx="32" cy="12" r="4" fill="white" stroke="black" stroke-width="1"/>
+  <line x1="32" y1="12" x2="32" y2="10" stroke="black" stroke-width="0.5"/>
+  <line x1="32" y1="12" x2="33.5" y2="12" stroke="black" stroke-width="0.5"/>
+  
+  <!-- Tower body -->
+  <rect x="24" y="16" width="16" height="20" fill="black"/>
+  
+  <!-- Tower windows -->
+  <rect x="26" y="18" width="3" height="3" fill="white"/>
+  <rect x="35" y="18" width="3" height="3" fill="white"/>
+  <rect x="26" y="23" width="3" height="3" fill="white"/>
+  <rect x="35" y="23" width="3" height="3" fill="white"/>
+  <rect x="26" y="28" width="3" height="3" fill="white"/>
+  <rect x="35" y="28" width="3" height="3" fill="white"/>
+  
+  <!-- Main building -->
+  <rect x="16" y="36" width="32" height="20" fill="black"/>
+  
+  <!-- Building columns -->
+  <rect x="18" y="36" width="2" height="20" fill="white"/>
+  <rect x="23" y="36" width="2" height="20" fill="white"/>
+  <rect x="28" y="36" width="2" height="20" fill="white"/>
+  <rect x="33" y="36" width="2" height="20" fill="white"/>
+  <rect x="38" y="36" width="2" height="20" fill="white"/>
+  <rect x="43" y="36" width="2" height="20" fill="white"/>
+  
+  <!-- Main entrance -->
+  <rect x="28" y="48" width="8" height="8" fill="white"/>
+  
+  <!-- Steps -->
+  <rect x="20" y="56" width="24" height="2" fill="black"/>
+  <rect x="18" y="58" width="28" height="2" fill="black"/>
+  <rect x="16" y="60" width="32" height="2" fill="black"/>
+</svg>
+
