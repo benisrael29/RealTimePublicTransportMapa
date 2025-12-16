@@ -1,0 +1,110 @@
+import { NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 3600; // Cache for 1 hour
+
+interface RouteInfo {
+  route_id: string;
+  route_type: number;
+}
+
+let routeTypeCache: Map<string, number> | null = null;
+let cacheTimestamp: number = 0;
+const CACHE_DURATION = 3600000; // 1 hour in milliseconds
+
+async function fetchRouteTypes(): Promise<Map<string, number>> {
+  const now = Date.now();
+  
+  // Return cached data if still valid
+  if (routeTypeCache && (now - cacheTimestamp) < CACHE_DURATION) {
+    return routeTypeCache;
+  }
+
+  const gtfsUrls = [
+    'https://gtfsrt.api.translink.com.au/GTFS/SEQ_GTFS.zip',
+    'https://transitfeeds.com/p/translink/21/latest/download',
+    'https://www.data.qld.gov.au/dataset/general-transit-feed-specification-gtfs-translink/resource/4b0e0a4e-8b1e-4b8e-9b1e-4b8e9b1e4b8e',
+  ];
+
+  const routeMap = new Map<string, number>();
+
+  // Try to fetch routes.txt directly (some feeds expose it)
+  const routesTxtUrls = [
+    'https://gtfsrt.api.translink.com.au/GTFS/SEQ/routes.txt',
+    'https://transitfeeds.com/p/translink/21/latest/download/routes.txt',
+  ];
+
+  for (const url of routesTxtUrls) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'Accept': 'text/csv, text/plain, */*',
+        },
+        next: { revalidate: 3600 },
+      });
+
+      if (response.ok) {
+        const text = await response.text();
+        const lines = text.split('\n');
+        const headers = lines[0].split(',').map(h => h.trim());
+        
+        const routeIdIndex = headers.indexOf('route_id');
+        const routeTypeIndex = headers.indexOf('route_type');
+
+        if (routeIdIndex !== -1 && routeTypeIndex !== -1) {
+          for (let i = 1; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+            
+            const values = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+            if (values.length > Math.max(routeIdIndex, routeTypeIndex)) {
+              const routeId = values[routeIdIndex];
+              const routeType = parseInt(values[routeTypeIndex], 10);
+              
+              if (routeId && !isNaN(routeType)) {
+                routeMap.set(routeId, routeType);
+              }
+            }
+          }
+          
+          if (routeMap.size > 0) {
+            routeTypeCache = routeMap;
+            cacheTimestamp = now;
+            return routeMap;
+          }
+        }
+      }
+    } catch (err) {
+      console.error(`Failed to fetch routes.txt from ${url}:`, err);
+      continue;
+    }
+  }
+
+  // Fallback: Return empty map if we can't fetch
+  routeTypeCache = routeMap;
+  cacheTimestamp = now;
+  return routeMap;
+}
+
+export async function GET() {
+  try {
+    const routeTypes = await fetchRouteTypes();
+    const routeTypeObject = Object.fromEntries(routeTypes);
+    
+    return NextResponse.json({
+      routes: routeTypeObject,
+      count: routeTypes.size,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    console.error('Error fetching route types:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch route types', routes: {}, count: 0 },
+      { status: 500 }
+    );
+  }
+}
+
+// Export the fetch function for use in other modules
+export { fetchRouteTypes };
+
